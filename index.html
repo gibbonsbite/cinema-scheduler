@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="fi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Elokuvateatteri — Ohjelmistotyökalu</title>
+  <link rel="stylesheet" href="css/style.css">
+  <script>
+    // Applied before the body paints, so there's no flash of the wrong theme.
+    document.documentElement.dataset.theme = localStorage.getItem('cs_theme') || 'light';
+  </script>
+</head>
+<body>
+
+<!-- ── Header ──────────────────────────────────────────────────────────── -->
+<header id="app-header">
+  <h1>🎬 Ohjelmistotyökalu</h1>
+  <span class="tagline">Elokuvateatterin viikko-ohjelma</span>
+  <button id="theme-toggle" title="Vaihda tumma/vaalea teema"></button>
+</header>
+
+<!-- ── Tab bar ─────────────────────────────────────────────────────────── -->
+<nav id="tab-bar">
+  <button class="tab-btn active" data-tab="kirjasto">Kirjasto</button>
+  <button class="tab-btn" data-tab="ohjelmointi">Ohjelmointi</button>
+  <button class="tab-btn" data-tab="asetukset">Asetukset</button>
+</nav>
+
+<!-- ── Warning bar ─────────────────────────────────────────────────────── -->
+<div id="warning-bar"></div>
+
+<!-- ══════════════════════════════════════════════════════════════════════ -->
+<!-- TAB 1: KIRJASTO                                                        -->
+<!-- ══════════════════════════════════════════════════════════════════════ -->
+<section id="kirjasto-panel" class="tab-panel active">
+  <div class="toolbar">
+    <button class="btn btn-primary" id="btn-lisaa-elokuva">+ Lisää elokuva</button>
+    <button class="btn btn-secondary" id="btn-tuo-elokuvat">⬆️ Tuo elokuvia</button>
+    <button class="btn btn-secondary" id="btn-vie-csv">⬇️ Vie CSV</button>
+    <input type="file" id="tuonti-tiedosto" accept=".csv,.xlsx" style="display:none">
+  </div>
+  <div class="card" style="padding:0">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Nimi</th>
+          <th>Kesto</th>
+          <th></th>
+          <th>Ikäraja</th>
+          <th>Hinta</th>
+          <th>Levittäjä</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="kirjasto-tbody"></tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════════════════════════ -->
+<!-- TAB 2: OHJELMOINTI                                                     -->
+<!-- ══════════════════════════════════════════════════════════════════════ -->
+<section id="ohjelmointi-panel" class="tab-panel">
+
+  <!-- Left: week setup -->
+  <aside class="viikko-setup">
+    <div class="card">
+      <div class="card-title">Viikko</div>
+      <div class="form-row half">
+        <div>
+          <label>Alku</label>
+          <input type="date" id="viikko-alku">
+        </div>
+        <div>
+          <label>Loppu</label>
+          <input type="date" id="viikko-loppu">
+        </div>
+      </div>
+      <span id="viikko-label"></span>
+    </div>
+
+    <div class="card">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <div class="card-title" style="margin-bottom:0">Elokuvat tällä viikolla</div>
+        <button type="button" id="btn-reset-kaikki-naytos" style="font-size:0.8em;font-weight:600;color:#555;background:none;border:none;cursor:pointer;padding:0" title="Palauta kaikkien näytösmäärät automaattisiksi">↺ Nollaa kaikki</button>
+      </div>
+      <button class="btn btn-secondary btn-block" id="btn-lisaa-viikkoon">+ Lisää elokuvia</button>
+      <div id="elokuva-lista"></div>
+    </div>
+
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn btn-primary" id="btn-luo-ohjelma">⚙️ Luo ohjelma</button>
+      <button class="btn btn-success" id="btn-vie-excel">⬇️ Vie Exceliin</button>
+      <button class="btn btn-secondary" id="btn-tuo-ohjelma" title="Tuo viikko-ohjelma Excel-tiedostosta (sama muoto kuin vienti)">⬆️ Tuo Excelistä</button>
+      <input type="file" id="ohjelma-tuonti-tiedosto" accept=".xlsx" style="display:none">
+    </div>
+  </aside>
+
+  <!-- Right: schedule grid -->
+  <div class="ohjelma-area">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+      <div class="card-title" style="margin-bottom:0">Viikko-ohjelma</div>
+      <div style="display:flex;align-items:center;gap:10px">
+      <button type="button" class="btn-tyhjenna" id="btn-tyhjenna-grid" title="Poista kaikki näytökset - viikon elokuvat säilyvät" disabled>🗑️ Tyhjennä</button>
+      <div class="historia-toggle">
+        <button type="button" class="historia-btn" id="btn-undo" title="Kumoa (Ctrl+Z)" disabled>↶ Kumoa</button>
+        <button type="button" class="historia-btn" id="btn-redo" title="Tee uudelleen (Ctrl+Y)" disabled>↷ Uudelleen</button>
+      </div>
+      <div class="suunta-toggle">
+        <button type="button" class="suunta-btn" id="suunta-btn-pysty" data-suunta="pysty" title="Pystysuora (aika alaspäin)">⬍ Pysty</button>
+        <button type="button" class="suunta-btn" id="suunta-btn-vaaka" data-suunta="vaaka" title="Vaakasuora (aika sivuttain)">⬌ Vaaka</button>
+      </div>
+      </div>
+    </div>
+    <div id="viikko-stats"></div>
+    <div id="viikko-aukiolo" title="Laskettu ohjelman näytöksistä - ei asetuksista"></div>
+    <div id="aikataulu-grid"></div>
+  </div>
+
+</section>
+
+<!-- ══════════════════════════════════════════════════════════════════════ -->
+<!-- TAB 3: ASETUKSET                                                       -->
+<!-- ══════════════════════════════════════════════════════════════════════ -->
+<section id="asetukset-panel" class="tab-panel">
+
+  <h3 class="settings-group-title">Automaattinen ohjelmointi</h3>
+  <div class="settings-grid">
+
+    <!-- Operating hours -->
+    <div class="card" style="flex:0 1 580px">
+      <div class="card-title">Aukioloajat</div>
+      <p class="card-hint">Aikaisin aloitus on turvaraja ja "viimeinen näytös alkaa" on illan ankkuri, johon ohjelma rakennetaan. Avaustavoite on aika, johon mennessä päivän ensimmäisen näytöksen halutaan alkavan &ndash; jos päivä jäisi lyhyemmäksi, sille lisätään näytöksiä. Painotus kertoo kuinka paljon näytöksiä päivä saa suhteessa muihin päiviin (vain suhteilla on väliä).</p>
+      <div class="hours-table-wrap">
+        <table class="hours-table">
+          <thead><tr><th>Päivä</th><th>Manuaalinen</th><th>Aikaisin aloitus</th><th>Avaustavoite</th><th>Viimeinen näytös alkaa</th><th>Painotus</th></tr></thead>
+          <tbody id="hours-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Show counts and gaps -->
+    <div class="card" style="flex:0 0 260px">
+      <div class="card-title">Näytösmäärät ja -välit</div>
+      <div class="gap-row">
+        <label>Näytöksiä viikossa (tavoite):</label>
+        <input type="number" id="viikko-naytokset" min="1" max="99" style="width:60px">
+      </div>
+      <div class="gap-row">
+        <label>Näytöksiä vähintään / sali / päivä:</label>
+        <input type="number" id="min-per-sali" min="0" max="6" style="width:60px">
+      </div>
+      <div class="gap-row">
+        <label>Sama sali (min):</label>
+        <input type="number" id="gap-sama" min="0" max="60" style="width:60px">
+      </div>
+      <div class="gap-row">
+        <label>Eri salit (min):</label>
+        <input type="number" id="gap-eri" min="0" max="60" style="width:60px">
+      </div>
+    </div>
+
+    <!-- Category rules -->
+    <div class="card" style="flex:1;min-width:300px">
+      <div class="card-title">Lastenelokuvan aikaikkuna</div>
+      <div id="kat-rules-container"></div>
+    </div>
+
+  </div>
+
+  <h3 class="settings-group-title">Excel-vienti</h3>
+  <div class="settings-grid">
+
+    <!-- Opening times for Excel -->
+    <div class="card" style="flex:0 0 260px">
+      <div class="card-title">Aukioloajat (Excel)</div>
+      <div class="gap-row">
+        <label>Avataan ennen ensimmäistä (min):</label>
+        <input type="number" id="aukiolo-ennen" min="0" max="120" style="width:55px">
+      </div>
+      <div class="gap-row">
+        <label>Suljetaan (min) viimeisen alusta:</label>
+        <input type="number" id="aukiolo-sulku" min="-120" max="120" style="width:55px">
+      </div>
+    </div>
+
+    <!-- Column widths -->
+    <div class="card" style="flex:0 0 220px">
+      <div class="card-title">Sarakeleveydet (Excel)</div>
+      <table class="hours-table">
+        <thead><tr><th>Sarake</th><th>Leveys</th></tr></thead>
+        <tbody id="col-widths-tbody"></tbody>
+      </table>
+    </div>
+
+  </div>
+
+  <div style="margin-top:16px">
+    <button class="btn btn-primary" id="btn-tallenna-asetukset">Tallenna asetukset</button>
+    <span id="asetukset-saved" style="margin-left:10px;color:#16a34a;font-size:0.85em;display:none">✓ Tallennettu</span>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════════════════════════ -->
+<!-- MODAL: Lisää / muokkaa elokuva                                         -->
+<!-- ══════════════════════════════════════════════════════════════════════ -->
+<div class="modal-overlay" id="elokuva-modal">
+  <div class="modal">
+    <h2 id="modal-otsikko">Lisää elokuva</h2>
+    <div class="form-row">
+      <label>Nimi *</label>
+      <input type="text" id="el-nimi" placeholder="Elokuvan nimi" maxlength="120">
+    </div>
+    <div class="form-row">
+      <label>Kesto (min) *</label>
+      <input type="number" id="el-kesto" min="1" max="600" placeholder="90">
+    </div>
+    <div class="form-row">
+      <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+        <input type="checkbox" id="el-lastenelokuva"> Lastenelokuva
+      </label>
+    </div>
+    <div class="form-row half">
+      <div>
+        <label>Ikäraja</label>
+        <select id="el-ikäraja">
+          <option value="S">S</option>
+          <option value="K-7">K-7</option>
+          <option value="K-12" selected>K-12</option>
+          <option value="K-16">K-16</option>
+          <option value="K-18">K-18</option>
+        </select>
+      </div>
+      <div>
+        <label>Hinta (€)</label>
+        <input type="number" id="el-hinta" min="0" step="0.50" placeholder="12.50">
+      </div>
+    </div>
+    <div class="form-row">
+      <label>Levittäjä</label>
+      <input type="text" id="el-jakelija" placeholder="esim. wds, wb, finn" maxlength="30">
+    </div>
+    <div class="error-text" id="el-error"></div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" id="btn-modal-peruuta">Peruuta</button>
+      <button class="btn btn-primary" id="btn-modal-tallenna">Tallenna</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════ -->
+<!-- MODAL: Tuo elokuvia (CSV / Excel-ohjelma)                              -->
+<!-- ══════════════════════════════════════════════════════════════════════ -->
+<div class="modal-overlay" id="tuonti-modal">
+  <div class="modal modal-wide">
+    <h2>Tuo elokuvia</h2>
+    <div class="tuonti-warnings" id="tuonti-warnings"></div>
+    <div class="tuonti-summary" id="tuonti-summary"></div>
+    <div class="tuonti-table-wrap">
+      <table class="data-table" id="tuonti-table">
+        <thead>
+          <tr>
+            <th><input type="checkbox" id="tuonti-select-all"></th>
+            <th>Nimi</th>
+            <th>Kesto</th>
+            <th>Ikäraja</th>
+            <th>Hinta</th>
+            <th>Levittäjä</th>
+            <th>Lasten.</th>
+            <th>Tila</th>
+          </tr>
+        </thead>
+        <tbody id="tuonti-tbody"></tbody>
+      </table>
+    </div>
+    <div class="error-text" id="tuonti-error"></div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" id="btn-tuonti-peruuta">Peruuta</button>
+      <button class="btn btn-primary" id="btn-tuonti-tallenna">Tuo valitut</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════ -->
+<!-- MODAL: Valitse viikon elokuvat kirjastosta                             -->
+<!-- ══════════════════════════════════════════════════════════════════════ -->
+<div class="modal-overlay" id="viikko-valinta-modal">
+  <div class="modal modal-wide">
+    <h2>Lisää elokuvia viikkoon</h2>
+    <p class="card-hint">Valitse kirjastosta ne elokuvat, jotka ovat ohjelmistossa tällä viikolla. Valinnan poistaminen poistaa elokuvan myös aikataulusta.</p>
+    <div class="valinta-toolbar">
+      <label class="valinta-select-all">
+        <input type="checkbox" id="viikko-valinta-select-all"> Valitse kaikki
+      </label>
+      <span class="tuonti-summary" id="viikko-valinta-summary"></span>
+    </div>
+    <div class="tuonti-table-wrap">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th></th>
+            <th>Nimi</th>
+            <th>Kesto</th>
+            <th></th>
+            <th>Ikäraja</th>
+            <th>Hinta</th>
+            <th>Levittäjä</th>
+            <th>Näytöksiä</th>
+          </tr>
+        </thead>
+        <tbody id="viikko-valinta-tbody"></tbody>
+      </table>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" id="btn-viikko-valinta-peruuta">Peruuta</button>
+      <button class="btn btn-primary" id="btn-viikko-valinta-tallenna">Tallenna valinta</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════ -->
+<!-- MODAL: Muokkaa yksittäistä näytöstä                                   -->
+<!-- ══════════════════════════════════════════════════════════════════════ -->
+<div class="modal-overlay" id="edit-modal">
+  <div class="modal">
+    <h2 id="edit-modal-otsikko">Muokkaa näytöstä</h2>
+    <div class="form-row">
+      <label>Sali</label>
+      <select id="edit-sali"></select>
+    </div>
+    <div class="form-row">
+      <label>Alkamisaika</label>
+      <input type="time" id="edit-alkaa">
+    </div>
+    <div class="form-row">
+      <label>Hinta (€)</label>
+      <input type="number" id="edit-hinta" min="0" step="0.50">
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" id="btn-edit-peruuta">Peruuta</button>
+      <button class="btn btn-primary" id="btn-edit-tallenna">Tallenna</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════ -->
+<!-- CONTEXT MENU                                                            -->
+<!-- ══════════════════════════════════════════════════════════════════════ -->
+<div id="context-menu">
+  <button id="ctx-muokkaa">✏️ Muokkaa näytöstä</button>
+  <button id="ctx-kopioi">📋 Kopioi seuraavaan</button>
+  <div class="ctx-sep"></div>
+  <button id="ctx-poista" style="color:#dc2626">🗑️ Poista näytös</button>
+</div>
+
+<!-- ── Scripts ──────────────────────────────────────────────────────────── -->
+<script src="vendor/xlsx.min.js"></script>
+<script src="js/storage.js"></script>
+<script src="js/library.js"></script>
+<script src="js/scheduler.js"></script>
+<script src="js/export.js"></script>
+<script src="js/schedule-ui.js"></script>
+<script src="js/settings-ui.js"></script>
+<script>
+  // ── Theme toggle ───────────────────────────────────────────────────────
+  function applyTheme(theme) {
+    document.documentElement.dataset.theme = theme;
+    document.getElementById('theme-toggle').textContent = theme === 'dark' ? '☀️' : '🌙';
+    localStorage.setItem('cs_theme', theme);
+  }
+  applyTheme(document.documentElement.dataset.theme || 'light');
+  document.getElementById('theme-toggle').addEventListener('click', () => {
+    applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
+  });
+
+  // ── Tab switching ──────────────────────────────────────────────────────
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const tab = btn.dataset.tab;
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+      btn.classList.add('active');
+      document.getElementById(tab + '-panel').classList.add('active');
+      if (tab === 'ohjelmointi') ScheduleUI.buildWeekPanel();
+      if (tab === 'asetukset') SettingsUI.render();
+    });
+  });
+
+  // ── Init all modules ───────────────────────────────────────────────────
+  Library.init();
+  ScheduleUI.init();
+  SettingsUI.init();
+
+  // ── Hash-based tab navigation (e.g. index.html#ohjelmointi) ───────────
+  function switchToHashTab() {
+    const hash = location.hash.slice(1);
+    if (!hash) return;
+    const btn = document.querySelector(`.tab-btn[data-tab="${hash}"]`);
+    if (btn) btn.click();
+  }
+  switchToHashTab();
+  window.addEventListener('hashchange', switchToHashTab);
+</script>
+</body>
+</html>

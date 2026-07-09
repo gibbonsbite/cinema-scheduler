@@ -1,0 +1,765 @@
+/* ── Theme variables ───────────────────────────────────────────── */
+:root {
+  --bg-body: #f0f2f5;
+  --bg-card: #fff;
+  --bg-card-alt: #f4f6fb;
+  --bg-hover: #f8f9fd;
+  --bg-input: #fff;
+  --text-main: #222;
+  --text-muted: #555;
+  --text-muted-2: #666;
+  --border-color: #d0d6ea;
+  --border-light: #e0e4ef;
+  --border-lighter: #e8ecf4;
+  --border-lightest: #f0f2f8;
+  --shadow-color: rgba(0,0,0,0.08);
+  --scrollbar-track: #f0f2f5;
+  --scrollbar-thumb: #c0c8d8;
+  color-scheme: light;
+}
+:root[data-theme="dark"] {
+  --bg-body: #14161c;
+  --bg-card: #1e2130;
+  --bg-card-alt: #262a3d;
+  --bg-hover: #2a2e42;
+  --bg-input: #1a1d29;
+  --text-main: #e4e6eb;
+  --text-muted: #a8adba;
+  --text-muted-2: #9096a5;
+  --border-color: #3a3f56;
+  --border-light: #333850;
+  --border-lighter: #2c3047;
+  --border-lightest: #262a3d;
+  --shadow-color: rgba(0,0,0,0.4);
+  --scrollbar-track: #1a1d29;
+  --scrollbar-thumb: #454b66;
+  color-scheme: dark;
+}
+
+/* ── Reset & base ──────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: 'Segoe UI', Arial, sans-serif;
+  font-size: 14px;
+  background: var(--bg-body);
+  color: var(--text-main);
+  min-height: 100vh;
+}
+
+/* ── App shell ─────────────────────────────────────────────────── */
+/* Fixed dark-navy brand chrome - intentionally does NOT use theme
+   variables, since it already reads fine as a header bar regardless of
+   whether the page content below is in light or dark mode. */
+#app-header {
+  background: #1a2744;
+  color: #fff;
+  padding: 12px 20px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+#app-header h1 { font-size: 1.1em; font-weight: 600; letter-spacing: 0.5px; }
+#app-header .tagline { font-size: 0.8em; color: #8ab4e0; }
+#theme-toggle {
+  margin-left: auto;
+  background: rgba(255,255,255,0.1);
+  border: 1px solid rgba(255,255,255,0.25);
+  border-radius: 4px;
+  color: #fff;
+  font-size: 1em;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+#theme-toggle:hover { background: rgba(255,255,255,0.2); }
+
+/* ── Tabs ──────────────────────────────────────────────────────── */
+#tab-bar {
+  background: #243057;
+  display: flex;
+  gap: 2px;
+  padding: 0 16px;
+}
+.tab-btn {
+  padding: 10px 20px;
+  border: none;
+  background: transparent;
+  color: #aac4e8;
+  cursor: pointer;
+  font-size: 0.9em;
+  font-weight: 500;
+  border-bottom: 3px solid transparent;
+  transition: color 0.15s, border-color 0.15s;
+}
+.tab-btn:hover { color: #fff; }
+.tab-btn.active { color: #fff; border-bottom-color: #4a9eff; }
+
+/* ── Tab panels ────────────────────────────────────────────────── */
+.tab-panel { display: none; padding: 20px; }
+.tab-panel.active { display: block; }
+
+/* ── Buttons ───────────────────────────────────────────────────── */
+.btn {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.88em;
+  font-weight: 500;
+  transition: background 0.15s, opacity 0.15s;
+}
+.btn:hover { opacity: 0.88; }
+.btn-primary { background: #2563eb; color: #fff; }
+.btn-success { background: #16a34a; color: #fff; }
+.btn-secondary { background: #6b7280; color: #fff; }
+.btn-danger-outline { background: transparent; border: 1px solid #dc2626; color: #dc2626; }
+.btn-icon { background: none; border: none; cursor: pointer; padding: 2px 5px; font-size: 1em; }
+
+/* ── Orientation toggle (Ohjelmointi tab) ──────────────────────── */
+.suunta-toggle { display: flex; border: 1px solid var(--border-color); border-radius: 4px; overflow: hidden; }
+.suunta-btn {
+  background: var(--bg-card);
+  border: none;
+  border-left: 1px solid var(--border-color);
+  padding: 5px 10px;
+  font-size: 0.8em;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.suunta-btn:first-child { border-left: none; }
+.suunta-btn:hover { background: var(--bg-card-alt); }
+.suunta-btn.active { background: #2563eb; color: #fff; }
+
+/* Undo/redo - same segmented look as the orientation toggle beside it */
+.historia-toggle { display: flex; border: 1px solid var(--border-color); border-radius: 4px; overflow: hidden; }
+.historia-btn {
+  background: var(--bg-card);
+  border: none;
+  border-left: 1px solid var(--border-color);
+  padding: 5px 10px;
+  font-size: 0.8em;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.historia-btn:first-child { border-left: none; }
+.historia-btn:hover:not(:disabled) { background: var(--bg-card-alt); }
+.historia-btn:disabled { opacity: 0.4; cursor: default; }
+.btn-danger { color: #dc2626; }
+
+/* Same chrome as the toggles beside it, but destructive. */
+.btn-tyhjenna {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 5px 10px;
+  font-size: 0.8em;
+  color: #dc2626;
+  cursor: pointer;
+}
+.btn-tyhjenna:hover:not(:disabled) { background: #dc2626; border-color: #dc2626; color: #fff; }
+.btn-tyhjenna:disabled { opacity: 0.4; cursor: default; color: var(--text-muted); }
+
+/* ── Cards ─────────────────────────────────────────────────────── */
+.card {
+  background: var(--bg-card);
+  border-radius: 6px;
+  box-shadow: 0 1px 4px var(--shadow-color);
+  padding: 16px;
+  margin-bottom: 16px;
+}
+.card-title {
+  font-size: 0.85em;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-muted);
+  margin-bottom: 12px;
+}
+
+/* ── Library table ─────────────────────────────────────────────── */
+#kirjasto-panel .toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.data-table { width: 100%; border-collapse: collapse; }
+.data-table th {
+  text-align: left;
+  padding: 8px 10px;
+  background: var(--bg-card-alt);
+  border-bottom: 2px solid var(--border-light);
+  font-size: 0.82em;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--text-muted);
+}
+.data-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-lightest);
+  vertical-align: middle;
+}
+.data-table tr:last-child td { border-bottom: none; }
+.data-table tr:hover td { background: var(--bg-hover); }
+.actions { white-space: nowrap; text-align: right; }
+
+/* ── Badges ────────────────────────────────────────────────────── */
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 0.78em;
+  font-weight: 600;
+  color: #fff;
+}
+.badge-lastenelokuva { background: #4caf8a; }
+
+/* ── Scheduling panel ──────────────────────────────────────────── */
+#ohjelmointi-panel { display: none; }
+#ohjelmointi-panel.active { display: flex; gap: 16px; flex-wrap: wrap; }
+
+.viikko-setup {
+  flex: 0 0 280px;
+  min-width: 240px;
+}
+.viikko-setup .card { margin-bottom: 12px; }
+
+#viikko-label {
+  font-size: 0.82em;
+  font-weight: 600;
+  color: #2563eb;
+  margin-top: 6px;
+  display: block;
+}
+
+#elokuva-lista { overflow-y: visible; } /* grows with content - the whole ranking must be visible without scrolling */
+
+.card-hint {
+  font-size: 0.78em;
+  color: var(--text-muted);
+  margin: -2px 0 8px;
+  line-height: 1.4;
+}
+
+#viikko-aukiolo {
+  font-size: 0.82em;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+  min-height: 1em;
+}
+
+/* Live week tally above the grid - totals for the week and per theater. */
+#viikko-stats {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  font-size: 0.82em;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+#viikko-stats .stat-total { color: var(--text-main); }
+#viikko-stats .stat-total strong { font-size: 1.25em; font-weight: 700; }
+#viikko-stats .stat-elokuvat { padding-right: 4px; border-right: 1px solid var(--border-color); }
+#viikko-stats .stat-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border: 1px solid var(--border-lighter);
+  border-radius: 12px;
+  background: var(--bg-card-alt);
+}
+#viikko-stats .stat-chip-nimi { font-size: 0.9em; text-transform: uppercase; letter-spacing: 0.4px; }
+#viikko-stats .stat-chip-arvo { font-weight: 700; color: var(--text-main); }
+/* Two-row layout: the title gets the whole first row to itself (it can wrap
+   instead of being truncated by the controls), and the per-movie controls
+   (show count, reset, theater) sit on their own second row, indented to
+   align under the title. */
+.elokuva-rivi {
+  padding: 5px 4px;
+  border-bottom: 1px solid var(--border-lightest);
+  font-size: 0.85em;
+  cursor: grab;
+}
+.elokuva-rivi:last-child { border-bottom: none; }
+.elokuva-rivi.dragging { opacity: 0.4; }
+.elokuva-rivi-main { display: flex; align-items: center; gap: 5px; min-width: 0; }
+.elokuva-rivi-main strong {
+  min-width: 0;
+  white-space: normal;
+  word-break: break-word;
+  line-height: 1.3;
+  padding: 2px 7px;
+  border-radius: 4px; /* colored via inline style with the movie's own grid color - a mini schedule block */
+}
+.elokuva-rivi-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 2px 0 0 30px; /* aligns under the title (past handle + rank) */
+}
+.btn-poista-viikosta { margin-left: auto; }
+
+.lista-tyhja { color: var(--text-muted); font-size: 0.85em; padding: 10px 2px 4px; }
+.btn-block { display: block; width: 100%; margin-bottom: 8px; }
+.elokuva-rivi .drag-handle {
+  color: #b6bdd0;
+  flex-shrink: 0;
+  font-size: 1.5em;
+  line-height: 1;
+  padding: 4px 2px;
+  cursor: grab;
+}
+.elokuva-rivi .rank-number {
+  color: var(--text-muted);
+  font-size: 0.9em;
+  font-weight: 700;
+  flex-shrink: 0;
+  min-width: 1.4em;
+}
+
+.el-naytos-tavoite {
+  width: 42px;
+  padding: 3px 4px;
+  border: 1px solid var(--border-color);
+  border-radius: 3px;
+  font-size: 0.95em;
+  text-align: center;
+  background: var(--bg-input);
+  color: var(--text-muted);
+}
+.el-naytos-tavoite.overridden { border-color: #2563eb; color: var(--text-main); font-weight: 700; background: var(--bg-card-alt); }
+.el-naytos-tavoite:not(.overridden) + .btn-reset-naytos { display: none; }
+
+.el-sali-ylitys {
+  padding: 3px 4px;
+  border: 1px solid var(--border-color);
+  border-radius: 3px;
+  font-size: 0.85em;
+  background: var(--bg-input);
+  color: var(--text-muted);
+}
+.el-sali-ylitys.overridden { border-color: #2563eb; color: var(--text-main); font-weight: 700; background: var(--bg-card-alt); }
+
+/* Native dropdown popups derive their surface from the select's own
+   background - a semi-transparent one (the dark-mode .overridden state)
+   composites the popup onto a light base, leaving light option text nearly
+   invisible. Give every option an explicit opaque surface and full-contrast
+   text in both themes instead of whatever it would inherit. */
+select option {
+  background: var(--bg-input);
+  color: var(--text-main);
+  font-weight: 400;
+}
+
+.ohjelma-area {
+  flex: 1 1 600px;
+  min-width: 0;
+}
+
+/* ── Timeline grid ─────────────────────────────────────────────── */
+/* Default orientation ("pysty"): time flows downward, theaters are columns,
+   days are sub-columns within a theater. The "suunta-vaaka" modifier below
+   flips this: time flows sideways, theaters are stacked rows, days are
+   sub-rows within a theater - see schedule-ui.js renderGrid(). */
+#aikataulu-grid {
+  display: flex;
+  gap: 0;
+  overflow: auto;
+  background: var(--bg-card);
+  border-radius: 6px;
+  box-shadow: 0 1px 4px var(--shadow-color);
+  padding: 8px;
+  min-height: 400px;
+}
+#aikataulu-grid.suunta-vaaka { flex-direction: column; }
+
+.time-axis {
+  flex: 0 0 40px;
+  position: relative;
+  border-right: 1px solid var(--border-light);
+  margin-top: 32px; /* sali-header height only; day-header accounted in tick top */
+}
+.suunta-vaaka .time-axis {
+  flex: 0 0 24px;
+  border-right: none;
+  border-bottom: 1px solid var(--border-light);
+  margin-top: 0;
+  margin-left: 30px; /* day-header width - no sali-header offset needed here */
+}
+.time-tick {
+  position: absolute;
+  right: 4px;
+  font-size: 0.7em;
+  color: var(--text-muted);
+  transform: translateY(-50%);
+  white-space: nowrap;
+}
+.suunta-vaaka .time-tick {
+  right: auto;
+  top: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.sali-wrapper {
+  display: flex;
+  flex: 1;
+  gap: 1px;
+  background: var(--border-lighter);
+}
+.suunta-vaaka .sali-wrapper { flex-direction: column; }
+
+.sali-col {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-card);
+}
+/* Clear divider between theaters - vertical mode only (theaters are stacked
+   rows in horizontal mode, so a right-border wouldn't separate them there). */
+#aikataulu-grid:not(.suunta-vaaka) .sali-col:not(:last-child) {
+  border-right: 3px solid #8a95b8;
+}
+
+.sali-header {
+  text-align: center;
+  font-weight: 700;
+  font-size: 0.8em;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-main);
+  background: var(--bg-card-alt);
+  padding: 6px 4px;
+  border-bottom: 2px solid var(--border-color);
+  height: 32px;
+}
+
+.sali-lane {
+  flex: 1;
+  display: flex;
+  gap: 1px;
+  background: var(--border-lighter);
+}
+.suunta-vaaka .sali-lane { flex-direction: column; }
+
+.hour-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: var(--border-lighter);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.day-col {
+  flex: 1;
+  position: relative;
+  background: var(--bg-card);
+  min-width: 60px;
+  overflow: hidden;
+}
+.suunta-vaaka .day-col {
+  display: flex;
+  flex-direction: row;
+  flex: 0 0 auto;
+  min-width: 0;
+  min-height: 44px;
+}
+/* An empty week still draws its full grid, so mark the day cells as the drop
+   targets they are rather than leaving a blank slate that looks broken. */
+.grid-tyhja .day-col { background: var(--bg-card-alt); }
+
+.day-header {
+  text-align: center;
+  font-size: 0.72em;
+  font-weight: 700;
+  color: var(--text-muted);
+  padding: 2px 0;
+  background: var(--bg-card-alt);
+  border-bottom: 1px solid var(--border-light);
+  height: 14px;
+  line-height: 14px;
+}
+.suunta-vaaka .day-header {
+  flex: 0 0 30px;
+  height: auto;
+  border-bottom: none;
+  border-right: 1px solid var(--border-light);
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+}
+
+/* ── Screening blocks ──────────────────────────────────────────── */
+.naytokset-block {
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  border-radius: 3px;
+  padding: 2px 4px;
+  /* color is set inline per block (schedule-ui.js movieColor()) - each
+     background needs its own black/white text for contrast, so no default
+     here */
+  font-size: 0.7em;
+  overflow: hidden;
+  cursor: grab;
+  user-select: none;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+  transition: opacity 0.1s;
+}
+.naytokset-block:hover { opacity: 0.9; filter: brightness(1.05); }
+.block-time { font-weight: 700; font-size: 0.9em; }
+.block-nimi {
+  font-size: 1em;
+  font-weight: 700;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-shadow: 0 1px 1px rgba(0,0,0,0.2), 0 1px 1px rgba(255,255,255,0.2);
+}
+.block-kesto { font-size: 0.75em; opacity: 0.8; }
+.block-lasten {
+  position: absolute;
+  top: 1px;
+  right: 2px;
+  font-size: 0.9em;
+  line-height: 1;
+}
+
+/* Same-theater gap (minimivali_sama_sali), shown right after each block */
+/* The cleanup gap after a show (minimivali_sama_sali). It marks time the room
+   is unavailable rather than time it is showing something, so it reads as an
+   empty, dashed-off area instead of a solid block - a filled amber bar looked
+   like a screening in its own right. Border-box keeps the dashed border from
+   growing the element past the width schedule-ui.js positions it at. */
+.buffer-zone {
+  position: absolute;
+  background: rgba(120, 130, 160, 0.07);
+  border: 2px dashed #7b869f;
+  border-radius: 2px;
+  pointer-events: none;
+  z-index: 1;
+}
+:root[data-theme="dark"] .buffer-zone {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: #79819e;
+}
+
+/* Live drag feedback - see onPointerMove in schedule-ui.js */
+.naytokset-block.live-dragging {
+  z-index: 5;
+  cursor: grabbing;
+  box-shadow: 0 4px 10px rgba(0,0,0,0.35);
+  opacity: 0.95;
+}
+/* The show cannot occupy the spot under the cursor. The drop still lands it on
+   the nearest slot that fits (or reverts, if the room-day is full) - the block
+   keeps tracking the cursor either way, and its time label reads the start the
+   drop would actually give it. */
+.naytokset-block.drag-invalid {
+  background-color: #c0392b !important;
+  color: #fff !important; /* overrides the movie's own inline text color, which may be black */
+  outline: 2px dashed #7a1f16;
+  outline-offset: -2px;
+}
+
+/* Preview shown while dragging a movie from the list onto the grid to add a
+   show - see onGridDragOver in schedule-ui.js. Reuses .drag-invalid above for
+   the same red "won't fit here" feedback used by existing block dragging. */
+.grid-drop-ghost {
+  opacity: 0.6;
+  pointer-events: none;
+  border: 2px dashed rgba(255,255,255,0.85);
+}
+
+/* ── Context menu ──────────────────────────────────────────────── */
+#context-menu {
+  position: fixed;
+  z-index: 1000;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 5px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+  min-width: 160px;
+  display: none;
+}
+#context-menu.open { display: block; }
+#context-menu button {
+  display: block;
+  width: 100%;
+  padding: 9px 14px;
+  background: none;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  font-size: 0.88em;
+  color: var(--text-main);
+}
+#context-menu button:hover { background: var(--bg-hover); }
+#context-menu .ctx-sep { border-top: 1px solid var(--border-lighter); margin: 2px 0; }
+
+/* ── Warning bar ───────────────────────────────────────────────── */
+#warning-bar {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #fef3c7;
+  border: 1px solid #f59e0b;
+  color: #92400e;
+  padding: 10px 20px;
+  border-radius: 6px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.12);
+  font-size: 0.88em;
+  opacity: 0;
+  transition: opacity 0.3s;
+  pointer-events: none;
+  z-index: 999;
+}
+#warning-bar.visible { opacity: 1; }
+
+/* ── Modals ────────────────────────────────────────────────────── */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.45);
+  z-index: 500;
+  display: none;
+  align-items: center;
+  justify-content: center;
+}
+.modal-overlay.open { display: flex; }
+.modal {
+  background: var(--bg-card);
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.18);
+  padding: 24px;
+  width: 420px;
+  max-width: 95vw;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+.modal h2 { font-size: 1em; font-weight: 700; margin-bottom: 16px; color: var(--text-main); }
+.form-row { margin-bottom: 12px; }
+.form-row label { display: block; font-size: 0.82em; font-weight: 600; color: var(--text-muted); margin-bottom: 4px; }
+.form-row input, .form-row select {
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  font-size: 0.9em;
+  background: var(--bg-input);
+  color: var(--text-main);
+  outline: none;
+  transition: border-color 0.15s;
+}
+.form-row input:focus, .form-row select:focus { border-color: #2563eb; }
+.form-row.half { display: flex; gap: 10px; }
+.form-row.half > div { flex: 1; }
+.modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+.error-text { color: #dc2626; font-size: 0.82em; margin-top: 8px; min-height: 1em; }
+
+/* ── Import preview modal ──────────────────────────────────────── */
+.modal-wide { width: 760px; }
+.tuonti-table-wrap { max-height: 50vh; overflow-y: auto; margin: 8px 0; border: 1px solid var(--border-lighter); border-radius: 4px; }
+.tuonti-summary { font-size: 0.85em; color: var(--text-muted); margin-bottom: 8px; }
+
+/* ── Week movie picker modal ───────────────────────────────────── */
+.valinta-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 10px; }
+.valinta-toolbar .tuonti-summary { margin-bottom: 0; }
+.valinta-select-all {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85em;
+  font-weight: 600;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.tuonti-warnings { font-size: 0.8em; color: #92400e; margin-bottom: 8px; }
+.tuonti-warnings:empty { display: none; }
+#tuonti-table .tuonti-field { width: 100%; padding: 4px 6px; border: 1px solid var(--border-color); border-radius: 4px; font-size: 0.85em; background: var(--bg-input); color: var(--text-main); }
+#tuonti-table td { vertical-align: middle; }
+tr.row-duplicate td { color: #94a3b8; }
+tr.row-invalid td { background: #fef2f2; }
+.tuonti-status { font-size: 0.8em; color: #92400e; white-space: nowrap; }
+
+/* ── Settings panel ────────────────────────────────────────────── */
+.settings-group-title {
+  font-size: 0.82em;
+  font-weight: 700;
+  color: var(--text-muted-2);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin: 22px 0 10px;
+}
+.settings-group-title:first-child { margin-top: 0; }
+
+.settings-grid { display: flex; gap: 16px; flex-wrap: wrap; }
+.settings-grid .card { flex: 1; min-width: 220px; }
+
+.hours-table-wrap { overflow-x: auto; }
+.hours-table { width: 100%; border-collapse: collapse; }
+.hours-table th, .hours-table td { padding: 5px 8px; font-size: 0.85em; }
+.hours-table th { color: var(--text-muted-2); font-weight: 600; text-align: left; }
+.hours-table input[type="time"] {
+  border: 1px solid var(--border-color);
+  border-radius: 3px;
+  padding: 3px 6px;
+  font-size: 0.85em;
+  width: 90px;
+  background: var(--bg-input);
+  color: var(--text-main);
+}
+
+.kat-rules-table { width: 100%; border-collapse: collapse; }
+.kat-rules-table th, .kat-rules-table td { padding: 5px 6px; font-size: 0.83em; }
+.kat-rules-table th { color: var(--text-muted-2); font-weight: 600; text-align: left; }
+.kat-rules-table input[type="time"] {
+  border: 1px solid var(--border-color);
+  border-radius: 3px;
+  padding: 3px 5px;
+  font-size: 0.82em;
+  width: 82px;
+  background: var(--bg-input);
+  color: var(--text-main);
+}
+.day-checkboxes { display: flex; flex-wrap: wrap; gap: 4px; }
+.day-checkboxes label { font-size: 0.78em; display: flex; align-items: center; gap: 2px; }
+
+.gap-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; font-size: 0.88em; }
+.gap-row input { width: 60px; padding: 5px 8px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--bg-input); color: var(--text-main); }
+
+/* ── Toolbar row for ohjelmointi ───────────────────────────────── */
+.ohjelma-toolbar {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+/* ── Scrollbar ─────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--scrollbar-track); }
+::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 3px; }
+
+/* ── Dark-mode-specific tweaks ─────────────────────────────────── */
+/* A few status colors were tuned to sit on a white card background and
+   need a lighter/adjusted variant to stay readable once that background
+   goes dark - everything else (badges, buttons, the warning bar, movie
+   blocks) already carries its own background and needs no change. */
+:root[data-theme="dark"] .tuonti-warnings,
+:root[data-theme="dark"] .tuonti-status { color: #fbbf24; }
+:root[data-theme="dark"] tr.row-invalid td { background: rgba(220,38,38,0.15); }
+:root[data-theme="dark"] .el-naytos-tavoite.overridden { background: rgba(37,99,235,0.2); }
+:root[data-theme="dark"] .el-sali-ylitys.overridden { background: rgba(37,99,235,0.2); }
