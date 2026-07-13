@@ -136,8 +136,22 @@ const Exporter = (() => {
       };
     });
 
-    // Opening times row: bold Arial + box border across A–I
+    // Opening times row: bold Arial + box border across A–I, merged into a
+    // single cell.
+    //
+    // The whole week's hours are one long string (~104 chars) written to column
+    // A, which is far narrower than the text. Excel only spills a cell's text
+    // into neighbouring cells that are truly EMPTY, and A's neighbours are not:
+    // they carry the box border, and this writer drops any cell that has no
+    // value at all, so each one has to hold an empty string to exist. Excel
+    // reads those as occupied and clipped the line at column A's width (82px);
+    // LibreOffice ignores empty strings and spilled it, which is why the row
+    // only looked right there. Merging the row's cells into one wide cell puts
+    // the text in a cell that is genuinely wide enough (A–I is 614px against
+    // the string's 593px at Arial 9 bold) and renders the same in both.
     const AUKIOLO_COLS = ['A','B','C','D','E','F','G','H','I'];
+    const aukioloRow0 = aukioloRowExcel - 1; // 0-indexed row for the merge range
+    ws['!merges'] = [{ s: { r: aukioloRow0, c: 0 }, e: { r: aukioloRow0, c: AUKIOLO_COLS.length - 1 } }];
     AUKIOLO_COLS.forEach((col, i) => {
       const addr = `${col}${aukioloRowExcel}`;
       if (!ws[addr]) ws[addr] = { t: 's', v: '' };

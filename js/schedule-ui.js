@@ -1402,18 +1402,49 @@ const ScheduleUI = (() => {
 
   // ── Init ──────────────────────────────────────────────────────────────────
 
-  // Which days the blank grid shows follows the date inputs immediately. Once
-  // the week has screenings on it the dates are left to apply on the next
-  // "Luo ohjelma" instead, so a stray date change can't silently strand shows
-  // on a day that just left the range.
+  // The dates the user picks are the week's dates, always - including a week
+  // that already has screenings on it, such as one just imported from Excel.
+  // (They used to be ignored in that case, which left an imported program stuck
+  // on the dates its file carried: the grid, the label and the Excel export all
+  // kept the old week no matter what the calendar said.)
+  //
+  // Screenings are keyed by WEEKDAY, not by date, so moving the week to another
+  // Friday-to-Thursday span carries every show with it and nothing is stranded.
+  // Only a range that drops a weekday entirely can strand shows - that destroys
+  // user data, so it takes a yes, and a no puts the dates back untouched.
   function onWeekDatesChanged() {
-    if (currentSchedule && currentSchedule.naytokset.length > 0) return;
-    if (currentSchedule) {
-      currentSchedule.viikkoAlku = document.getElementById('viikko-alku').value;
-      currentSchedule.viikkoLoppu = document.getElementById('viikko-loppu').value;
-      Storage.saveSchedule(currentSchedule);
+    const alku = document.getElementById('viikko-alku').value;
+    if (!alku) return;
+    const loppu = document.getElementById('viikko-loppu').value || addDays(alku, 6);
+
+    if (!currentSchedule) { renderGrid(); return; }
+
+    const paivat = new Set(Scheduler.getPaivat(alku, loppu));
+    const stranded = currentSchedule.naytokset.filter(n => !paivat.has(n.paiva));
+    const unchanged = currentSchedule.viikkoAlku === alku && currentSchedule.viikkoLoppu === loppu;
+    if (unchanged && stranded.length === 0) return;
+
+    if (stranded.length > 0) {
+      const days = [...new Set(stranded.map(n => n.paiva))].join(', ');
+      const ok = confirm(
+        `Uusi jakso ei sisällä päiviä ${days}, joilla on ${stranded.length} näytöstä.\n\n` +
+        'Poistetaanko nämä näytökset?\n(Peruuta palauttaa edelliset päivämäärät.)'
+      );
+      if (!ok) {
+        document.getElementById('viikko-alku').value = currentSchedule.viikkoAlku;
+        document.getElementById('viikko-loppu').value = currentSchedule.viikkoLoppu;
+        updateWeekLabel(currentSchedule.viikkoAlku, currentSchedule.viikkoLoppu);
+        return;
+      }
     }
+
+    pushUndo(); // restores both the old dates and any screenings dropped with them
+    currentSchedule.naytokset = currentSchedule.naytokset.filter(n => paivat.has(n.paiva));
+    currentSchedule.viikkoAlku = alku;
+    currentSchedule.viikkoLoppu = loppu;
+    Storage.saveSchedule(currentSchedule);
     renderGrid();
+    refreshNaytosPreview(); // a longer or shorter week changes what "Luo ohjelma" would produce
   }
 
   function init() {

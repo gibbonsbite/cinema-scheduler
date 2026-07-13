@@ -91,6 +91,36 @@ const Storage = (() => {
     },
   };
 
+  // Titles are ALL CAPS on a programme sheet - every reference schedule and
+  // every export writes them that way - so that is how they are stored, no
+  // matter how they were typed in the library modal or what case an imported
+  // file happened to use. Normalizing here (rather than at each entry point)
+  // means every path through Storage lands on the same canonical title:
+  // manual add/edit, CSV import, Excel schedule import, and the movies and
+  // screenings already saved by an older version, which are rewritten the
+  // first time they are read back.
+  function isoNimi(nimi) {
+    return String(nimi ?? '').trim().replace(/\s+/g, ' ').toLocaleUpperCase('fi-FI');
+  }
+
+  // Uppercases `nimi` in place on anything that has one (library movies and
+  // schedule screenings alike). Mutates rather than copying so a caller holding
+  // the same array - Library's `movies`, ScheduleUI's `currentSchedule` - sees
+  // the canonical title immediately, without re-reading from storage. Returns
+  // true if any title actually changed.
+  function normalizeNimet(items) {
+    let changed = false;
+    (items ?? []).forEach(item => {
+      if (!item || item.nimi == null) return;
+      const iso = isoNimi(item.nimi);
+      if (iso !== item.nimi) {
+        item.nimi = iso;
+        changed = true;
+      }
+    });
+    return changed;
+  }
+
   function load(key, fallback) {
     try {
       const raw = localStorage.getItem(key);
@@ -143,16 +173,27 @@ const Storage = (() => {
           ? m
           : { ...m, lastenelokuva: m.kategoria === 'lastenelokuva' }
       );
-      if (ensureColorSlots(movies)) save(KEYS.MOVIES, movies);
+      const renamed = normalizeNimet(movies);
+      if (ensureColorSlots(movies) || renamed) save(KEYS.MOVIES, movies);
       return movies;
     },
     saveMovies: (movies) => {
+      normalizeNimet(movies);
       ensureColorSlots(movies);
       save(KEYS.MOVIES, movies);
     },
 
-    getSchedule: () => load(KEYS.SCHEDULE, null),
-    saveSchedule: (schedule) => save(KEYS.SCHEDULE, schedule),
+    getSchedule: () => {
+      const schedule = load(KEYS.SCHEDULE, null);
+      // A screening carries its own copy of the title, so the week saved by an
+      // older version needs the same rewrite the library gets.
+      if (schedule && normalizeNimet(schedule.naytokset)) save(KEYS.SCHEDULE, schedule);
+      return schedule;
+    },
+    saveSchedule: (schedule) => {
+      normalizeNimet(schedule?.naytokset);
+      save(KEYS.SCHEDULE, schedule);
+    },
 
     getSettings: () => {
       const saved = load(KEYS.SETTINGS, null);
