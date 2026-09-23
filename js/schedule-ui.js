@@ -1044,8 +1044,15 @@ const ScheduleUI = (() => {
       const bands = currentSchedule.naytokset
         .filter(n => n.id !== excludeId && n.paiva === paiva && n.sali !== sali)
         .map(n => {
+          // Starts snap to the quarter-hour grid, and each one is drawn as the
+          // quarter-hour slot it opens. The blocked starts are strictly less
+          // than `gap` away (a start exactly `gap` off is allowed), so the band
+          // runs from the first blocked slot to the end of the last one. Drawn
+          // as plain s±gap, it reached a whole slot too early on the left.
           const s = toMin(n.alkaa);
-          return [Math.max(GRID_START, s - gap), Math.min(GRID_END, s + gap)];
+          const firstBlocked = Math.floor((s - gap) / 15) * 15 + 15;
+          const lastBlocked = Math.ceil((s + gap) / 15) * 15 - 15;
+          return [Math.max(GRID_START, firstBlocked), Math.min(GRID_END, lastBlocked + 15)];
         })
         .sort((a, b) => a[0] - b[0])
         .reduce((merged, [from, to]) => {
