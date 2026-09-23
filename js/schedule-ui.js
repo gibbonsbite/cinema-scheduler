@@ -1448,7 +1448,62 @@ const ScheduleUI = (() => {
     document.getElementById('edit-sali').value = n.sali;
     document.getElementById('edit-hinta').value = n.hinta;
     document.getElementById('edit-modal-otsikko').textContent = `Muokkaa: ${n.nimi}`;
+    fillEditMovieSelect(n);
     document.getElementById('edit-modal').classList.add('open');
+  }
+
+  // The movie picker: this week's roster first, in rank order, then the rest
+  // of the library alphabetically. A show whose movie has left the library
+  // keeps an entry of its own, so opening the modal never changes it.
+  function fillEditMovieSelect(n) {
+    const select = document.getElementById('edit-elokuva');
+    const roster = rosterMovies();
+    const onRoster = new Set(roster.map(m => m.id));
+    const rest = Library.getAll().filter(m => !onRoster.has(m.id))
+      .sort((a, b) => a.nimi.localeCompare(b.nimi, 'fi'));
+    const option = (id, nimi) => `<option value="${escHtml(id)}">${escHtml(nimi)}</option>`;
+    let html = '';
+    if (!onRoster.has(n.elokuvaId) && !rest.some(m => m.id === n.elokuvaId)) html += option(n.elokuvaId, n.nimi);
+    if (roster.length) html += `<optgroup label="Tämän viikon elokuvat">${roster.map(m => option(m.id, m.nimi)).join('')}</optgroup>`;
+    if (rest.length) html += `<optgroup label="Muut kirjaston elokuvat">${rest.map(m => option(m.id, m.nimi)).join('')}</optgroup>`;
+    select.innerHTML = html;
+    select.value = n.elokuvaId;
+    document.getElementById('edit-kaikki').checked = true;
+    onEditMovieChange();
+  }
+
+  // Picking another movie reveals the "all shows" option (with this week's
+  // count) and puts the new movie's price in the price field, since the show
+  // would otherwise keep the old movie's ticket price.
+  function onEditMovieChange() {
+    const n = currentSchedule?.naytokset.find(x => x.id === contextTarget);
+    if (!n) return;
+    const newId = document.getElementById('edit-elokuva').value;
+    const changed = newId !== n.elokuvaId;
+    const count = currentSchedule.naytokset.filter(x => x.elokuvaId === n.elokuvaId).length;
+    document.getElementById('edit-kaikki-rivi').hidden = !changed || count < 2;
+    document.getElementById('edit-kaikki-teksti').textContent =
+      `Vaihda kaikki ${n.nimi} -näytökset tällä viikolla (${count} kpl)`;
+    const movie = Library.getAll().find(m => m.id === newId);
+    document.getElementById('edit-hinta').value = changed && movie ? movie.hinta : n.hinta;
+  }
+
+  // Turns shows of one movie into another: title, length, rating, price,
+  // distributor and kids flag all come from the new movie, so the grid color
+  // and the Excel row follow. Start times and rooms stay; a longer film can
+  // therefore run into the next show, which is reported, not prevented -
+  // the user can drag it clear.
+  function switchMovie(shows, movie) {
+    shows.forEach(x => {
+      x.elokuvaId = movie.id;
+      x.nimi = movie.nimi;
+      x.kesto = movie.kesto;
+      x.ikäraja = movie.ikäraja;
+      x.hinta = movie.hinta;
+      x.jakelija = movie.jakelija;
+      x.lastenelokuva = !!movie.lastenelokuva;
+      x.loppuu = toHHMM(toMin(x.alkaa) + movie.kesto);
+    });
   }
 
   function contextRemove() {
@@ -1489,14 +1544,59 @@ const ScheduleUI = (() => {
     const newSali  = document.getElementById('edit-sali').value;
     const newHinta = parseFloat(document.getElementById('edit-hinta').value);
     if (!newAlkaa) { alert('Syötä alkamisaika.'); return; }
+    const oldId = n.elokuvaId;
+    const newMovie = Library.getAll().find(m => m.id === document.getElementById('edit-elokuva').value);
+    const switching = newMovie && newMovie.id !== oldId;
+    const all = switching && document.getElementById('edit-kaikki').checked;
     pushUndo();
     n.alkaa  = newAlkaa;
-    n.loppuu = toHHMM(toMin(newAlkaa) + n.kesto);
     n.sali   = newSali;
+    if (switching) {
+      switchMovie(all ? currentSchedule.naytokset.filter(x => x.elokuvaId === oldId) : [n], newMovie);
+      rosterAfterSwitch(oldId, newMovie.id);
+    }
+    n.loppuu = toHHMM(toMin(newAlkaa) + n.kesto);
     n.hinta  = isNaN(newHinta) ? n.hinta : newHinta;
     Storage.saveSchedule(currentSchedule);
     document.getElementById('edit-modal').classList.remove('open');
-    renderGrid();
+    if (switching) {
+      buildWeekPanel(); // the roster changed too
+      renderGrid();
+      const clashes = currentSchedule.naytokset.filter(x => x.elokuvaId === newMovie.id &&
+        Scheduler.validateScreening(x, currentSchedule.naytokset, Storage.getSettings()).length > 0).length;
+      if (clashes) showWarning(`${clashes} ${newMovie.nimi} -näytöstä on nyt liian lähellä toista näytöstä - siirrä ne vapaaseen kohtaan.`);
+    } else {
+      renderGrid();
+    }
+  }
+
+  // Keeps the week's roster in step with a movie switch. The new movie takes
+  // the old one's place in the ranking (right after it, if the old movie
+  // still has shows). A pinned show count is re-pinned to what each movie
+  // now actually runs, so the numbers in the list match the grid. When the
+  // old movie has no shows left it leaves the roster, and a pinned room
+  // carries over unless the new movie has its own.
+  function rosterAfterSwitch(oldId, newId) {
+    const valitut = currentSchedule.valitut ?? (currentSchedule.valitut = []);
+    const oldGone = !currentSchedule.naytokset.some(x => x.elokuvaId === oldId);
+    const oldIdx = valitut.indexOf(oldId);
+    if (!valitut.includes(newId)) {
+      if (oldIdx === -1) valitut.push(newId);
+      else valitut.splice(oldIdx + (oldGone ? 0 : 1), 0, newId);
+    }
+    const tavoitteet = currentSchedule.naytosTavoitteet ?? (currentSchedule.naytosTavoitteet = {});
+    if (tavoitteet[oldId] != null || tavoitteet[newId] != null) {
+      tavoitteet[newId] = showCount(newId);
+      if (tavoitteet[oldId] != null) tavoitteet[oldId] = showCount(oldId);
+    }
+    if (!oldGone) return;
+    currentSchedule.valitut = valitut.filter(id => id !== oldId);
+    delete tavoitteet[oldId];
+    const salit = currentSchedule.saliYlitys;
+    if (salit && salit[oldId] != null) {
+      if (salit[newId] == null) salit[newId] = salit[oldId];
+      delete salit[oldId];
+    }
   }
 
   function showWarning(msg) {
@@ -1622,6 +1722,7 @@ const ScheduleUI = (() => {
 
     // Edit modal
     document.getElementById('btn-edit-tallenna').addEventListener('click', saveEditModal);
+    document.getElementById('edit-elokuva').addEventListener('change', onEditMovieChange);
     document.getElementById('btn-edit-peruuta').addEventListener('click', () => {
       document.getElementById('edit-modal').classList.remove('open');
     });

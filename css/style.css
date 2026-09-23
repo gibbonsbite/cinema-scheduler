@@ -685,6 +685,10 @@ select option {
 }
 .form-row input:focus, .form-row select:focus { border-color: #2563eb; }
 .form-row.half { display: flex; gap: 10px; }
+/* The "switch every show" option under the edit modal's movie picker */
+.form-row label.edit-kaikki { display: flex; align-items: center; gap: 6px; margin: 6px 0 0; font-weight: 400; font-size: 0.85em; color: var(--text); }
+.form-row label.edit-kaikki[hidden] { display: none; }
+.form-row label.edit-kaikki input { width: auto; margin: 0; }
 .form-row.half > div { flex: 1; }
 .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
 .error-text { color: #dc2626; font-size: 0.82em; margin-top: 8px; min-height: 1em; }

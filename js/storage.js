@@ -11,7 +11,7 @@ const Storage = (() => {
     settings: {
       // The scheduler builds each day BACKWARDS from the evening, so these
       // two fields mean: sulkeutuu = the evening anchor (when that day's
-      // LAST show starts - the median last showtime per weekday across 27
+      // LAST show starts - the median last showtime per weekday across 32
       // weeks of reference schedules), avautuu = the absolute earliest a
       // show may ever start (a wide safety floor, not a real opening time).
       // The actual opening time is never configured or hardcoded - it
@@ -25,28 +25,31 @@ const Storage = (() => {
         PE: { avautuu: '09:00', sulkeutuu: '20:00' },
         LA: { avautuu: '09:00', sulkeutuu: '19:45' },
         SU: { avautuu: '09:00', sulkeutuu: '17:45' },
-        MA: { avautuu: '09:00', sulkeutuu: '18:45' },
+        MA: { avautuu: '09:00', sulkeutuu: '18:30' },
         TI: { avautuu: '09:00', sulkeutuu: '19:15' },
-        KE: { avautuu: '09:00', sulkeutuu: '20:00' },
+        KE: { avautuu: '09:00', sulkeutuu: '19:15' },
         TO: { avautuu: '09:00', sulkeutuu: '19:15' },
       },
       // How heavily each weekday is programmed relative to the others. The
       // scheduler fills days in proportion to these, so a bigger number
       // means more shows land on that day. Defaults are the average per-day
-      // show counts across the 27 reference weeks (Saturday the peak at
-      // 9.2, Monday the lightest at 5.3); the absolute scale doesn't matter,
-      // only the ratios do.
+      // counts of regular shows across the 32 reference weeks (Saturday the
+      // peak at 9.2, Monday the lightest at 4.6); the absolute scale doesn't
+      // matter, only the ratios do. Special events - private screenings,
+      // opera, the film club, KE-KINO - are left out: the scheduler never
+      // generates those, and counting them had inflated Wednesday to 7.0.
       paivapainot: {
-        PE: 6.4, LA: 9.2, SU: 6.6, MA: 5.3, TI: 6.0, KE: 7.0, TO: 6.4,
+        PE: 6.3, LA: 9.2, SU: 6.6, MA: 4.6, TI: 5.6, KE: 5.9, TO: 5.8,
       },
       // When each weekday's FIRST show should start, at the latest - the
-      // median first-show start per weekday across the 27 reference weeks.
+      // median first-show start per weekday across the 32 reference weeks
+      // (regular shows only, like paivapainot).
       // The scheduler's backwards-packed chains usually open this early on
       // their own; if a light program would open a day later than this, the
       // day is topped up with extra shows until its opening lands as close
       // to the target as possible. Set a day earlier to force it longer.
       avautuu_tavoite: {
-        PE: '16:30', LA: '13:30', SU: '14:00', MA: '16:00', TI: '16:00', KE: '15:45', TO: '16:15',
+        PE: '16:30', LA: '13:30', SU: '14:00', MA: '16:00', TI: '16:15', KE: '16:00', TO: '16:15',
       },
       // Roughly how many shows a full 7-day week should run in total
       // (reference weeks run 38-61, median 46). Spare capacity under this
@@ -89,6 +92,14 @@ const Storage = (() => {
         hintaraja: 12.5,
       },
     },
+  };
+
+  // The defaults before they were recalibrated on regular shows only (see
+  // paivapainot above) - getSettings uses them to tell a value the user
+  // actually changed from one that was merely saved along.
+  const OLD_DEFAULTS = {
+    paivapainot: { PE: 6.4, LA: 9.2, SU: 6.6, MA: 5.3, TI: 6.0, KE: 7.0, TO: 6.4 },
+    avautuu_tavoite: { PE: '16:30', LA: '13:30', SU: '14:00', MA: '16:00', TI: '16:00', KE: '15:45', TO: '16:15' },
   };
 
   // Titles are ALL CAPS on a programme sheet - every reference schedule and
@@ -227,8 +238,13 @@ const Storage = (() => {
       Object.entries(merged.aukioloajat_yliajot).forEach(([p, h]) => {
         merged.aukioloajat[p] = h;
       });
-      if (saved.paivapainot) merged.paivapainot = Object.assign(merged.paivapainot, saved.paivapainot);
-      if (saved.avautuu_tavoite) merged.avautuu_tavoite = Object.assign(merged.avautuu_tavoite, saved.avautuu_tavoite);
+      // Saving Asetukset writes every day's weight and target, edited or not,
+      // so a saved value still equal to the previous release's default is
+      // one the user never chose - it follows the recalibrated default.
+      const keepEdited = (savedMap, oldDefaults) => Object.fromEntries(
+        Object.entries(savedMap).filter(([p, v]) => v !== oldDefaults[p]));
+      if (saved.paivapainot) merged.paivapainot = Object.assign(merged.paivapainot, keepEdited(saved.paivapainot, OLD_DEFAULTS.paivapainot));
+      if (saved.avautuu_tavoite) merged.avautuu_tavoite = Object.assign(merged.avautuu_tavoite, keepEdited(saved.avautuu_tavoite, OLD_DEFAULTS.avautuu_tavoite));
       if (saved.naytoksia_viikossa != null) merged.naytoksia_viikossa = saved.naytoksia_viikossa;
       if (saved.min_naytoksia_salissa != null) merged.min_naytoksia_salissa = saved.min_naytoksia_salissa;
       if (saved.minimivali_sama_sali != null) merged.minimivali_sama_sali = saved.minimivali_sama_sali;

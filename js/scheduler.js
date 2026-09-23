@@ -81,6 +81,22 @@ const Scheduler = (() => {
       tiers.push(i < RANK_TIERS.length ? RANK_TIERS[i] : 2);
     }
     let spare = capacity - nTop * 7 - tiers.reduce((a, b) => a + b, 0);
+    // A big roster overflows the week instead: 32 reference weeks run 41-49
+    // regular shows whether they carry 9 titles or 15 - the tail simply
+    // thins out, ending in several one-show titles. So an overflowing tail
+    // is scaled down to fit (never below one show each), and the rounding
+    // leftover is handed back by the spare loop below. Without this a
+    // 15-title roster generated 54 shows against the reference's 46-48.
+    if (spare < 0 && tiers.length > 0) {
+      const room = Math.max(tiers.length, capacity - nTop * 7);
+      const scale = room / tiers.reduce((a, b) => a + b, 0);
+      for (let i = 0; i < tiers.length; i++) tiers[i] = Math.max(1, Math.round(tiers[i] * scale));
+      // Rounding can land over the target too; trim the far tail back.
+      for (let i = tiers.length - 1; i >= 0 && tiers.reduce((a, b) => a + b, 0) > room; i--) {
+        if (tiers[i] > 1) tiers[i]--;
+      }
+      spare = room - tiers.reduce((a, b) => a + b, 0);
+    }
     while (spare > 0) {
       // Spread each round of spare shows across the taper's steps - one +1
       // at the head of every descending run, left to right ([5,4,4,3,3,2]
@@ -111,24 +127,24 @@ const Scheduler = (() => {
   const KEEP_PRIORITY = ['LA', 'SU', 'PE', 'MA', 'TI', 'TO', 'KE'];
 
   // How many shows each weekday carries relative to the others - the average
-  // per-day show counts across all 27 reference weeks. Saturday is the peak
-  // business day (9.2 shows on average, half again more than a weekday) and
-  // Monday the lightest (5.3). Day picking below fills days in proportion to
+  // per-day regular show counts across all 32 reference weeks. Saturday is
+  // the peak business day (9.2 shows on average, half again more than a
+  // weekday) and Monday the lightest (4.6). Day picking below fills days in proportion to
   // these, so weekends pack tightest, exactly like the real schedules -
   // a flat everyone-gets-the-same split would starve Saturday to feed Monday.
   // These are only the fallback: settings.paivapainot (editable in the
   // Asetukset hours table) carries the live values.
-  const DAY_WEIGHT = { MA: 5.3, TI: 6.0, KE: 7.0, TO: 6.4, PE: 6.4, LA: 9.2, SU: 6.6 };
+  const DAY_WEIGHT = { MA: 4.6, TI: 5.6, KE: 5.9, TO: 5.8, PE: 6.3, LA: 9.2, SU: 6.6 };
 
   // When each weekday's FIRST show should start, at the latest - the median
-  // first-show start per weekday across the 27 reference weeks (Saturday
+  // first-show start per weekday across the 32 reference weeks (Saturday
   // opens at 13:30, a plain weekday around 16:00). The backwards-packed
   // chains usually reach this on their own; when a light roster would open
   // a day later than this, the day loop tops the day up with extra shows
   // until its opening lands as close to the target as an extra chain link
   // can get it. Fallback for settings.avautuu_tavoite (editable in
   // Asetukset).
-  const OPEN_TARGET = { MA: '16:00', TI: '16:00', KE: '15:45', TO: '16:15', PE: '16:30', LA: '13:30', SU: '14:00' };
+  const OPEN_TARGET = { MA: '16:00', TI: '16:15', KE: '16:00', TO: '16:15', PE: '16:30', LA: '13:30', SU: '14:00' };
 
   // When a movie's day-budget is below its number of eligible days, its days
   // are picked to fill the week PROPORTIONALLY: the day whose current load
@@ -266,7 +282,31 @@ const Scheduler = (() => {
     // and the best-ranked adult sits on the anchor (adult prime is the
     // evening). The three rooms' anchors are staggered 30 min apart - the
     // median gap between rooms' last starts across 27 reference weeks.
+    //
+    // Which room gets the latest anchor is NOT a matter of rank. Across 32
+    // reference weeks the day's very last show is the #1 title on only 15%
+    // of days - no more often than any other rank - and every room order
+    // occurs. The one lean in the data is length: of two rooms' last shows,
+    // the longer film starts earlier 61% of the time. So the anchors go to
+    // the rooms by their evening film's length and rank (anchorOrder in
+    // buildDay). Handing STUDIO 1 the latest anchor every day made the #1
+    // title the day's last show 94% of the time.
     const ANCHOR_STAGGER = 30; // min between consecutive rooms' evening anchors
+
+    // Two rooms never start at the same time: the reference has a
+    // cross-room start pair under 15 min apart on 0.2% of occasions (vs 2%
+    // for the generator before this rule). Applied as a floor under the
+    // user's own minimivali_eri_sali.
+    const MIN_ERI_SALI = 15;
+
+    // A room running more shows than the day usually gives a room ends LATER
+    // as well as starting earlier - the reference splits the extra length
+    // between the two ends. A 3-show Sunday room runs 13:45-17:45 against the
+    // usual 2-show 14:45-17:15, a 4-show Saturday room 13:15-19:45 against
+    // 14:30-19:00. Without this, every extra show went on the front of the
+    // day, and those rooms opened at 11-12 o'clock. The usual count is the
+    // day's weight split over the three rooms (Saturday 3, others 2).
+    const EXTRA_SHOW_LATER = 30;
 
     paivat.forEach(paiva => {
       const aukiolo = settings.aukioloajat[paiva];
@@ -276,6 +316,7 @@ const Scheduler = (() => {
       const gapEri = settings.minimivali_eri_sali;
       const kidsEarliest = toMin(settings.lastenelokuva.aikaisintaan);
       const kidsLatestEnd = toMin(settings.lastenelokuva.viimeistaan);
+      const typicalRoomShows = Math.max(1, Math.round(weightOf(paiva) / SALAT.length));
 
       // Today's showings - one entry per show, so a naytosTavoitteet target
       // above the day count appears here as many times as it plays today.
@@ -371,18 +412,32 @@ const Scheduler = (() => {
 
         // ── Chain ordering and backwards packing per room ──
         const entries = [];     // the day's placements, collected room by room
-        const placedToday = []; // starts already emitted today (for the optional cross-theater stagger)
+        const placedToday = []; // starts already emitted today (for the cross-theater spacing)
 
-        SALAT.forEach((sali, saliIdx) => {
+        // Chronological chain per room: kids first, best-ranked kids title
+        // earliest (it takes the prime matinee slot); adults after, ordered so
+        // the BEST adult lands last, on the room's evening anchor.
+        const chains = {};
+        SALAT.forEach(sali => {
           const roomShows = rooms[sali];
-          if (roomShows.length === 0) return;
-
-          // Chronological chain: kids first, best-ranked kids title earliest
-          // (it takes the prime matinee slot); adults after, ordered so the
-          // BEST adult lands last, on the evening anchor.
           const kids = roomShows.filter(x => x.movie.lastenelokuva).sort((a, b) => a.rankIndex - b.rankIndex);
           const adults = roomShows.filter(x => !x.movie.lastenelokuva).sort((a, b) => b.rankIndex - a.rankIndex);
-          const chain = [...kids, ...adults];
+          chains[sali] = [...kids, ...adults];
+        });
+        // Anchor order (see ANCHOR_STAGGER): the room whose evening film is
+        // shortest and lowest-ranked takes the latest anchor. A rank step
+        // weighs as much as 4 min of running time - fitted on the reference,
+        // it puts the #1 title on the day's last slot on 18% of days (15% in
+        // the reference) and spreads the six room orders about as evenly.
+        const eveningScore = sali => {
+          const last = chains[sali][chains[sali].length - 1];
+          return last ? last.movie.kesto - 4 * last.rankIndex : 0;
+        };
+        const anchorOrder = [...SALAT].sort((a, b) => eveningScore(a) - eveningScore(b));
+
+        anchorOrder.forEach((sali, staggerIdx) => {
+          const chain = chains[sali];
+          if (chain.length === 0) return;
 
           // Pack backwards from this room's anchor: the last show starts ON
           // the anchor; each earlier show ends one cleanup buffer (floored to
@@ -392,7 +447,8 @@ const Scheduler = (() => {
           // hit it (possible only with extreme manual repeat targets) drops
           // its lowest-priority show until it fits.
           const packOnce = (arr) => {
-            let anchor = anchorMin - saliIdx * ANCHOR_STAGGER;
+            let anchor = anchorMin - staggerIdx * ANCHOR_STAGGER
+              + EXTRA_SHOW_LATER * Math.max(0, arr.length - typicalRoomShows);
             const last = arr[arr.length - 1];
             if (last.movie.lastenelokuva) {
               anchor = Math.min(anchor, floor15(kidsLatestEnd - last.movie.kesto));
@@ -445,15 +501,18 @@ const Scheduler = (() => {
             for (let j = i; j < chain.length; j++) starts[j] -= pull;
           }
 
-          // Optional cross-theater stagger (default 0 = off): nudge the whole
-          // chain earlier in 15-min steps until no show starts within gapEri
-          // of another room's show - the chain itself stays intact.
-          if (gapEri > 0) {
-            const collides = () => starts.some(st =>
-              placedToday.some(p => Math.abs(p - st) < gapEri));
+          // Cross-theater spacing: no show starts within gapEri (at least
+          // MIN_ERI_SALI) of another room's start. Walking the chain from the
+          // evening backwards, a colliding show moves 15 min earlier together
+          // with everything before it, so the gaps in front of it stay intact
+          // and only the one after it widens - the room's later shows, and its
+          // evening anchor, stay where they are.
+          const eri = Math.max(gapEri ?? 0, MIN_ERI_SALI);
+          const collides = st => placedToday.some(p => Math.abs(p - st) < eri);
+          for (let i = chain.length - 1; i >= 0; i--) {
             let guard = 8;
-            while (guard-- > 0 && collides() && starts[0] - 15 >= floorMin) {
-              for (let i = 0; i < starts.length; i++) starts[i] -= 15;
+            while (guard-- > 0 && collides(starts[i]) && starts[0] - 15 >= floorMin) {
+              for (let j = 0; j <= i; j++) starts[j] -= 15;
             }
           }
 
