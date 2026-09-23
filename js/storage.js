@@ -134,30 +134,27 @@ const Storage = (() => {
     localStorage.setItem(key, JSON.stringify(value));
   }
 
-  // Grid color assignment (js/schedule-ui.js's GRID_COLORS) needs a per-movie
-  // slot that's genuinely unique - not just a hash that happens not to
-  // collide - so it's assigned here once and persisted, exactly like id or
-  // nimi, rather than derived fresh every time. Mutates any movie missing
-  // colorSlot in place, picking the lowest slot (0-15) not already taken by
-  // another movie in this same list - deleting a movie frees its slot for
-  // the next new one automatically, since only movies that currently exist
-  // are ever checked. Returns true if anything was assigned (caller decides
-  // whether that needs persisting).
+  // Each movie carries a persisted colorSlot (0-15) into the grid palette
+  // (js/schedule-ui.js's GRID_COLORS), assigned here once like id or nimi
+  // rather than derived fresh every time, so a movie's color survives
+  // regenerations and reorderings. It is a PREFERENCE, not a guarantee: the
+  // library grows past 16 titles within a few weeks of imports, so slots
+  // repeat across the library no matter what. What the user actually sees
+  // is one week's roster of ~8-12 movies, and schedule-ui.js's weekColors()
+  // resolves any clash inside that roster at render time. This just spreads
+  // new movies onto the slots the library uses least, so those clashes stay
+  // rare. Mutates in place; returns true if anything was assigned (caller
+  // decides whether that needs persisting).
   const COLOR_SLOT_COUNT = 16;
   function ensureColorSlots(movies) {
-    const used = new Set(movies.map(m => m.colorSlot).filter(s => s != null));
+    const inUse = new Array(COLOR_SLOT_COUNT).fill(0);
+    movies.forEach(m => { if (m.colorSlot != null) inUse[m.colorSlot % COLOR_SLOT_COUNT]++; });
     let changed = false;
-    let overflow = 0; // once all 16 slots are taken, cycle rather than pile every remaining movie onto slot 15
     movies.forEach(m => {
       if (m.colorSlot != null) return;
       let slot = 0;
-      while (used.has(slot) && slot < COLOR_SLOT_COUNT) slot++;
-      if (slot >= COLOR_SLOT_COUNT) {
-        slot = overflow % COLOR_SLOT_COUNT;
-        overflow++;
-      } else {
-        used.add(slot);
-      }
+      for (let i = 1; i < COLOR_SLOT_COUNT; i++) if (inUse[i] < inUse[slot]) slot = i;
+      inUse[slot]++;
       m.colorSlot = slot;
       changed = true;
     });

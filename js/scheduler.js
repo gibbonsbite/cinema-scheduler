@@ -549,22 +549,33 @@ const Scheduler = (() => {
   // in the editor). Opening hours are intentionally NOT checked here - manual
   // edits are free to run earlier/later than the configured hours, and
   // schedule-ui.js extends that day's hours to match instead of blocking the
-  // move. Only same-theater overlap (respecting the gap) is a hard constraint,
-  // since two shows genuinely cannot play in the same room at once.
+  // move. Two things are hard constraints:
+  //
+  //  - Same-theater overlap, respecting minimivali_sama_sali: two shows
+  //    genuinely cannot play in the same room at once.
+  //  - Cross-theater start spacing, minimivali_eri_sali (default 0 = off):
+  //    no show may START within that many minutes of a show starting in
+  //    another room the same day - the same |start - start| < gap test the
+  //    generator's stagger pass uses, so a hand-moved show obeys exactly what
+  //    the generator was asked to. schedule-ui.js draws these no-start bands
+  //    while dragging (drawEriSaliZones).
   function validateScreening(naytos, allNaytokset, settings) {
     const warnings = [];
     const startMin = toMin(naytos.alkaa);
     const endMin = startMin + naytos.kesto;
     const gapSama = settings.minimivali_sama_sali;
+    const gapEri = settings.minimivali_eri_sali ?? 0;
 
-    const same = allNaytokset.filter(n =>
-      n.id !== naytos.id && n.sali === naytos.sali && n.paiva === naytos.paiva
-    );
-    same.forEach(n => {
+    const today = allNaytokset.filter(n => n.id !== naytos.id && n.paiva === naytos.paiva);
+    today.forEach(n => {
       const nStart = toMin(n.alkaa);
-      const nEnd = nStart + n.kesto;
-      if (startMin < nEnd + gapSama && endMin + gapSama > nStart) {
-        warnings.push(`Päällekkäisyys: ${n.nimi}`);
+      if (n.sali === naytos.sali) {
+        const nEnd = nStart + n.kesto;
+        if (startMin < nEnd + gapSama && endMin + gapSama > nStart) {
+          warnings.push(`Päällekkäisyys: ${n.nimi}`);
+        }
+      } else if (gapEri > 0 && Math.abs(nStart - startMin) < gapEri) {
+        warnings.push(`Liian lähellä toisen salin alkua: ${n.nimi} (${n.sali} ${n.alkaa})`);
       }
     });
 

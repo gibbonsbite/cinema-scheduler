@@ -554,6 +554,27 @@ select option {
   border-color: #79819e;
 }
 
+/* Times a show may not START at while dragging, because a show in another
+   room starts within the "Eri salit" gap - see drawEriSaliZones() in
+   schedule-ui.js. Stripes rather than a fill, so the hour grid stays readable
+   through them and they can't be mistaken for a show. */
+.eri-sali-zone {
+  position: absolute;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    45deg,
+    rgba(192, 57, 43, 0.22) 0 4px,
+    rgba(192, 57, 43, 0.05) 4px 9px
+  );
+}
+:root[data-theme="dark"] .eri-sali-zone {
+  background: repeating-linear-gradient(
+    45deg,
+    rgba(255, 112, 97, 0.28) 0 4px,
+    rgba(255, 112, 97, 0.06) 4px 9px
+  );
+}
+
 /* Live drag feedback - see onPointerMove in schedule-ui.js */
 .naytokset-block.live-dragging {
   z-index: 5;

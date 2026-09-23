@@ -21,6 +21,7 @@ const ScheduleUI = (() => {
   let draggingMovieId = null; // movie being dragged from the list, if any (see grid drop target below)
   let gridDropCandidate = null;
   let gridGhostEl = null;
+  let eriSaliZonesDrawn = false; // see drawEriSaliZones()
 
   // ── Undo / redo ──────────────────────────────────────────────────────────
   // Snapshots of currentSchedule, capped at the 5 most recent actions. Every
@@ -119,23 +120,54 @@ const ScheduleUI = (() => {
     { bg: '#a54924', text: '#ffffff' }, // orange (shade)
   ];
 
-  // Color follows the movie's own persisted colorSlot (Storage.js assigns it
-  // once, guaranteeing no two movies collide while under 16 total), never
-  // rank or position - so a movie's color stays stable across regenerations
-  // regardless of what other movies are added, removed, or reordered around
-  // it. `movieById` is a Map built once per renderGrid() call; falls back to
-  // hashing the id (the old, non-guaranteed behavior) only if a screening
-  // references a movie no longer in the library.
-  function movieColor(movieId, movieById) {
-    const movie = movieById.get(movieId);
-    if (movie && movie.colorSlot != null) {
-      return GRID_COLORS[movie.colorSlot % GRID_COLORS.length];
-    }
-    let hash = 0;
-    for (let i = 0; i < movieId.length; i++) {
-      hash = (hash * 31 + movieId.charCodeAt(i)) | 0;
-    }
-    return GRID_COLORS[Math.abs(hash) % GRID_COLORS.length];
+  // One color per movie for THIS week, as a Map id -> palette entry, built
+  // once per render and shared by the grid blocks and the roster chips (the
+  // roster doubles as the legend, so both must agree).
+  //
+  // Storage.js gives every movie a persisted colorSlot, but only as a
+  // preference: the library holds every title ever imported, far more than
+  // 16, so slots inevitably repeat across it - and a week whose roster mixes
+  // old titles with freshly imported ones used to come out with several
+  // movies in the same color. The clash is resolved here, inside the week's
+  // roster: walking it in rank order, a movie keeps its own slot unless a
+  // higher-ranked movie already took it, in which case it gets the lowest
+  // slot still free this week. So colors are unique while the roster has
+  // 16 or fewer movies, and a movie's color is stable across regenerations,
+  // since only the roster (not the grid) decides it. A screening whose movie
+  // is gone from the library falls back to hashing its id.
+  function weekColors() {
+    const byId = new Map(Library.getAll().map(m => [m.id, m]));
+    const naytokset = currentSchedule?.naytokset ?? [];
+    const ids = [...new Set([...(currentSchedule?.valitut ?? []), ...naytokset.map(n => n.elokuvaId)])];
+    const N = GRID_COLORS.length;
+    const taken = new Set();
+    const colors = new Map();
+    ids.forEach(id => {
+      const movie = byId.get(id);
+      let slot;
+      if (!movie) {
+        let hash = 0;
+        for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) | 0;
+        slot = Math.abs(hash) % N;
+      } else {
+        const own = (movie.colorSlot ?? 0) % N;
+        slot = own;
+        if (taken.has(own)) {
+          const free = [...Array(N).keys()].find(i => !taken.has(i));
+          if (free != null) slot = free;
+        }
+      }
+      taken.add(slot);
+      colors.set(id, GRID_COLORS[slot]);
+    });
+    return colors;
+  }
+
+  function movieColor(movieId, colors) {
+    if (colors.has(movieId)) return colors.get(movieId);
+    // Not on the roster and without screenings - can only happen for a
+    // roster row rendered from ids that never made it into `valitut`.
+    return GRID_COLORS[0];
   }
 
   // ── This week's roster ───────────────────────────────────────────────────
@@ -353,10 +385,11 @@ const ScheduleUI = (() => {
       return;
     }
 
-    // The title chip carries the movie's own grid color, so the ranking list
-    // reads as a legend for the schedule blocks; the kids marker is the same
-    // 👶 the grid blocks use (the old separate "Lapset" badge is gone).
-    const movieById = new Map(movies.map(m => [m.id, m]));
+    // The title chip carries the movie's grid color for this week, so the
+    // ranking list reads as a legend for the schedule blocks; the kids marker
+    // is the same 👶 the grid blocks use (the old separate "Lapset" badge is
+    // gone).
+    const colors = weekColors();
 
     roster.forEach((m, i) => {
       const div = document.createElement('div');
@@ -364,7 +397,7 @@ const ScheduleUI = (() => {
       div.draggable = true;
       div.dataset.id = m.id;
 
-      const color = movieColor(m.id, movieById);
+      const color = movieColor(m.id, colors);
       const lastenMarker = m.lastenelokuva ? '<span title="Lastenelokuva">👶 </span>' : '';
       div.innerHTML = `
         <div class="elokuva-rivi-main">
@@ -524,6 +557,7 @@ const ScheduleUI = (() => {
     e.currentTarget.classList.remove('dragging');
     draggingMovieId = null;
     clearGridDropPreview();
+    clearEriSaliZones();
     renumberRows(); // rows were reordered live in onRowDragOver - fix up the displayed rank numbers to match
 
     // The roster IS the rank order, so a reorder is a real change to persist -
@@ -809,13 +843,14 @@ const ScheduleUI = (() => {
     renderViikkoAukiolo();
     const container = document.getElementById('aikataulu-grid');
     container.innerHTML = '';
+    eriSaliZonesDrawn = false;
 
     const naytokset = currentSchedule?.naytokset ?? [];
     const settings = Storage.getSettings();
     const horizontal = settings.aikataulu_suunta === 'vaaka';
     container.classList.toggle('suunta-vaaka', horizontal);
     container.classList.toggle('grid-tyhja', naytokset.length === 0);
-    const movieById = new Map(Library.getAll().map(m => [m.id, m]));
+    const colors = weekColors();
 
     const totalMin = GRID_END - GRID_START;
     const gridLen = totalMin * PX_PER_MIN; // px length of the time axis
@@ -904,7 +939,7 @@ const ScheduleUI = (() => {
         }
 
         screenings.forEach(n => {
-          const block = buildBlock(n, horizontal, headerOffset, movieById);
+          const block = buildBlock(n, horizontal, headerOffset, colors);
           dayCol.appendChild(block);
 
           // Same-theater gap after this show - visualizes minimivali_sama_sali,
@@ -953,12 +988,12 @@ const ScheduleUI = (() => {
     }
   }
 
-  function buildBlock(n, horizontal, headerOffset, movieById) {
+  function buildBlock(n, horizontal, headerOffset, colors) {
     const startMin = toMin(n.alkaa);
     const offset = headerOffset + (startMin - GRID_START) * PX_PER_MIN;
     const sizeAlong = Math.max(n.kesto * PX_PER_MIN, horizontal ? 40 : 20);
 
-    const color = movieColor(n.elokuvaId, movieById);
+    const color = movieColor(n.elokuvaId, colors);
     const block = document.createElement('div');
     block.className = 'naytokset-block';
     positionBox(block, horizontal, offset, sizeAlong + 'px', '2px', '2px');
@@ -982,6 +1017,59 @@ const ScheduleUI = (() => {
     return block;
   }
 
+  // ── Cross-theater no-start bands ──────────────────────────────────────────
+
+  // Shown only while something is being dragged. In every room-day cell, a
+  // striped band marks the times at which a show may NOT start because a show
+  // in another room starts within minimivali_eri_sali of it - the dragged
+  // block's leading edge landing inside a band is what turns it red
+  // (Scheduler.validateScreening). It's the start that's constrained, not the
+  // whole block, which is why the band is drawn around the other show's start
+  // and not its span. Bands that overlap are merged so the stripes stay even.
+  // `excludeId` is the show being moved: its own old start must not fence
+  // off the other rooms. Nothing is drawn when the setting is 0 (the default).
+  function drawEriSaliZones(excludeId) {
+    clearEriSaliZones();
+    if (!currentSchedule) return;
+    const settings = Storage.getSettings();
+    const gap = settings.minimivali_eri_sali ?? 0;
+    if (gap <= 0) return;
+    const horizontal = settings.aikataulu_suunta === 'vaaka';
+    const headerOffset = horizontal ? DAY_HEADER_W : DAY_HEADER_H;
+
+    document.querySelectorAll('#aikataulu-grid .day-col').forEach(cell => {
+      const { sali, paiva } = cell.dataset;
+      const bands = currentSchedule.naytokset
+        .filter(n => n.id !== excludeId && n.paiva === paiva && n.sali !== sali)
+        .map(n => {
+          const s = toMin(n.alkaa);
+          return [Math.max(GRID_START, s - gap), Math.min(GRID_END, s + gap)];
+        })
+        .sort((a, b) => a[0] - b[0])
+        .reduce((merged, [from, to]) => {
+          const last = merged[merged.length - 1];
+          if (last && from <= last[1]) last[1] = Math.max(last[1], to);
+          else merged.push([from, to]);
+          return merged;
+        }, []);
+
+      const firstLine = cell.querySelector('.hour-line');
+      bands.forEach(([from, to]) => {
+        const zone = document.createElement('div');
+        zone.className = 'eri-sali-zone';
+        positionBox(zone, horizontal, headerOffset + (from - GRID_START) * PX_PER_MIN, ((to - from) * PX_PER_MIN) + 'px', '0', '0');
+        // Under the hour lines and every block, so nothing loses legibility.
+        cell.insertBefore(zone, firstLine);
+      });
+    });
+    eriSaliZonesDrawn = true;
+  }
+
+  function clearEriSaliZones() {
+    document.querySelectorAll('#aikataulu-grid .eri-sali-zone').forEach(z => z.remove());
+    eriSaliZonesDrawn = false;
+  }
+
   // ── Drag and drop ─────────────────────────────────────────────────────────
 
   // Dragging is custom (mousedown/mousemove/mouseup) rather than native HTML5
@@ -991,8 +1079,9 @@ const ScheduleUI = (() => {
   // a `position:fixed` overlay that follows the cursor, snapped to the same
   // 15-min/theater grid it would actually land on, and re-run
   // Scheduler.validateScreening() on every move so the clone visibly flags
-  // (red) any position that would overlap another show's buffer. Only a
-  // currently-valid position can be dropped; anything else reverts.
+  // (red) any position that would overlap another show's buffer or start too
+  // close to another room's show (the striped bands, drawEriSaliZones). Only
+  // a currently-valid position can be dropped; anything else reverts.
   function onBlockMouseDown(e) {
     if (e.button !== 0) return;
     e.preventDefault();
@@ -1025,6 +1114,8 @@ const ScheduleUI = (() => {
       setFixedBox(buf, bufRect.left, bufRect.top, bufRect.width, bufRect.height);
     }
 
+    drawEriSaliZones(id);
+
     dragState = {
       id,
       kesto: n.kesto,
@@ -1047,8 +1138,10 @@ const ScheduleUI = (() => {
   // show reads as "put it after that one". Returns the wanted start unchanged
   // when it already fits, or null when the whole room-day has no room for it.
   //
-  // Only same-room overlap constrains a screening (Scheduler.validateScreening),
-  // so this never has to look outside the cell being dropped into.
+  // Everything that constrains a screening (Scheduler.validateScreening) is
+  // about the same day, so this never has to look outside the cell being
+  // dropped into - other rooms only matter for the start-spacing rule, and
+  // that too is a question about this cell's day.
   function nearestFreeStart(base, wantedStart, kesto, settings) {
     const existing = currentSchedule?.naytokset ?? [];
     const maxStart = GRID_END - kesto;
@@ -1219,6 +1312,9 @@ const ScheduleUI = (() => {
 
     const movie = Library.getAll().find(m => m.id === draggingMovieId);
     if (!movie) return;
+    // Drawn on first contact with the grid rather than at dragstart, so a
+    // plain reorder inside the list never paints the grid.
+    if (!eriSaliZonesDrawn) drawEriSaliZones(null);
 
     const settings = Storage.getSettings();
     const horizontal = settings.aikataulu_suunta === 'vaaka';
