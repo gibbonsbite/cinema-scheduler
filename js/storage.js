@@ -146,12 +146,15 @@ const Storage = (() => {
   // rare. Mutates in place; returns true if anything was assigned (caller
   // decides whether that needs persisting).
   const COLOR_SLOT_COUNT = 16;
+  // Anything but a whole number 0-15 (a string, NaN, a negative left by some
+  // older build) counts as no slot at all and is reassigned.
+  const validSlot = slot => Number.isInteger(slot) && slot >= 0 && slot < COLOR_SLOT_COUNT;
   function ensureColorSlots(movies) {
     const inUse = new Array(COLOR_SLOT_COUNT).fill(0);
-    movies.forEach(m => { if (m.colorSlot != null) inUse[m.colorSlot % COLOR_SLOT_COUNT]++; });
+    movies.forEach(m => { if (validSlot(m.colorSlot)) inUse[m.colorSlot]++; });
     let changed = false;
     movies.forEach(m => {
-      if (m.colorSlot != null) return;
+      if (validSlot(m.colorSlot)) return;
       let slot = 0;
       for (let i = 1; i < COLOR_SLOT_COUNT; i++) if (inUse[i] < inUse[slot]) slot = i;
       inUse[slot]++;
@@ -161,11 +164,29 @@ const Storage = (() => {
     return changed;
   }
 
+  // Whatever an older version (or a hand-edited backup) left in storage, the
+  // UI gets well-formed records back: one malformed entry used to throw
+  // inside the first grid render, and since the modules initialize one after
+  // another in index.html, that also left every later button unwired. Broken
+  // entries are dropped only from what is returned - storage itself is not
+  // rewritten here; the next ordinary save simply stops carrying them.
+  const isHHMM = t => typeof t === 'string' && /^\d{1,2}:\d{2}$/.test(t);
+  function cleanSchedule(schedule) {
+    if (!schedule || typeof schedule !== 'object') return null;
+    schedule.naytokset = (Array.isArray(schedule.naytokset) ? schedule.naytokset : [])
+      .filter(n => n && typeof n === 'object' && n.elokuvaId != null && isHHMM(n.alkaa));
+    if (schedule.valitut != null) {
+      schedule.valitut = Array.isArray(schedule.valitut) ? schedule.valitut.filter(id => id != null) : [];
+    }
+    return schedule;
+  }
+
   return {
     // Movies saved before the blockbuster/taide categories were removed have a
     // `kategoria` string instead of a `lastenelokuva` boolean; derive it on read.
     getMovies: () => {
-      const movies = load(KEYS.MOVIES, []).map(m =>
+      const raw = load(KEYS.MOVIES, []);
+      const movies = (Array.isArray(raw) ? raw : []).filter(m => m && typeof m === 'object' && m.id != null).map(m =>
         typeof m.lastenelokuva === 'boolean'
           ? m
           : { ...m, lastenelokuva: m.kategoria === 'lastenelokuva' }
@@ -181,7 +202,7 @@ const Storage = (() => {
     },
 
     getSchedule: () => {
-      const schedule = load(KEYS.SCHEDULE, null);
+      const schedule = cleanSchedule(load(KEYS.SCHEDULE, null));
       // A screening carries its own copy of the title, so the week saved by an
       // older version needs the same rewrite the library gets.
       if (schedule && normalizeNimet(schedule.naytokset)) save(KEYS.SCHEDULE, schedule);

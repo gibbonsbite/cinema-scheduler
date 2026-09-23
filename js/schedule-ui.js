@@ -143,14 +143,16 @@ const ScheduleUI = (() => {
     const taken = new Set();
     const colors = new Map();
     ids.forEach(id => {
+      if (id == null) return;
       const movie = byId.get(id);
       let slot;
       if (!movie) {
+        const key = String(id);
         let hash = 0;
-        for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) | 0;
+        for (let i = 0; i < key.length; i++) hash = (hash * 31 + key.charCodeAt(i)) | 0;
         slot = Math.abs(hash) % N;
       } else {
-        const own = (movie.colorSlot ?? 0) % N;
+        const own = Number.isInteger(movie.colorSlot) ? Math.abs(movie.colorSlot) % N : 0;
         slot = own;
         if (taken.has(own)) {
           const free = [...Array(N).keys()].find(i => !taken.has(i));
@@ -1236,10 +1238,11 @@ const ScheduleUI = (() => {
     // Red means "not here": either the spot under the cursor is taken (the drop
     // will slide it to `start`) or the whole room-day is full (the drop reverts).
     block.classList.toggle('drag-invalid', !!candidate && blockedAt(candidate));
-    // The time shown is always where the block would LAND, so a slide is never
-    // a surprise even though the block itself is still under the cursor.
+    // The time shown is the spot under the cursor, red or not, so it always
+    // matches where the block is drawn. Where a red drop actually lands is
+    // reported by the warning bar once it's done (snappedNotice).
     const timeSpan = block.querySelector('.block-time');
-    if (timeSpan && candidate) timeSpan.textContent = toHHMM(candidate.start).replace(':', '.');
+    if (timeSpan && candidate) timeSpan.textContent = toHHMM(candidate.wanted).replace(':', '.');
   }
 
   function onPointerUp() {
@@ -1330,12 +1333,12 @@ const ScheduleUI = (() => {
     const candidate = { sali: base.sali, paiva: base.paiva, start, wanted, valid: fitted != null, snapped: start !== wanted, movieId: movie.id };
 
     // Ghost sits under the cursor and reddens where the show cannot go, exactly
-    // like a block being moved; its label reads the time the drop would give it.
-    showGridDropPreview(dayCol, horizontal, headerOffset, wanted, start, movie.kesto, blockedAt(candidate));
+    // like a block being moved, and its label reads the cursor's time too.
+    showGridDropPreview(dayCol, horizontal, headerOffset, wanted, movie.kesto, blockedAt(candidate));
     gridDropCandidate = candidate;
   }
 
-  function showGridDropPreview(dayCol, horizontal, headerOffset, posStart, labelStart, kesto, blocked) {
+  function showGridDropPreview(dayCol, horizontal, headerOffset, posStart, kesto, blocked) {
     if (!gridGhostEl) {
       gridGhostEl = document.createElement('div');
       gridGhostEl.className = 'naytokset-block grid-drop-ghost';
@@ -1346,7 +1349,7 @@ const ScheduleUI = (() => {
     const offset = headerOffset + (posStart - GRID_START) * PX_PER_MIN;
     const sizeAlong = Math.max(kesto * PX_PER_MIN, horizontal ? 40 : 20);
     positionBox(gridGhostEl, horizontal, offset, sizeAlong + 'px', '2px', '2px');
-    gridGhostEl.querySelector('.block-time').textContent = toHHMM(labelStart).replace(':', '.');
+    gridGhostEl.querySelector('.block-time').textContent = toHHMM(posStart).replace(':', '.');
     gridGhostEl.classList.toggle('drag-invalid', blocked);
   }
 

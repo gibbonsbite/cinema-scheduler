@@ -387,9 +387,11 @@
   });
 
   // ── Init all modules ───────────────────────────────────────────────────
-  Library.init();
-  ScheduleUI.init();
-  SettingsUI.init();
+  // Each module on its own: an exception in one (say, stale data tripping the
+  // first grid render) must not leave the others' buttons unwired.
+  [Library, ScheduleUI, SettingsUI].forEach(m => {
+    try { m.init(); } catch (err) { console.error(err); }
+  });
 
   // ── Hash-based tab navigation (e.g. index.html#ohjelmointi) ───────────
   function switchToHashTab() {
