@@ -1490,9 +1490,8 @@ const ScheduleUI = (() => {
 
   // Turns shows of one movie into another: title, length, rating, price,
   // distributor and kids flag all come from the new movie, so the grid color
-  // and the Excel row follow. Start times and rooms stay; a longer film can
-  // therefore run into the next show, which is reported, not prevented -
-  // the user can drag it clear.
+  // and the Excel row follow. Start times and rooms stay; the shows after
+  // them are moved to fit by reflowAfterSwitch.
   function switchMovie(shows, movie) {
     shows.forEach(x => {
       x.elokuvaId = movie.id;
@@ -1549,25 +1548,84 @@ const ScheduleUI = (() => {
     const switching = newMovie && newMovie.id !== oldId;
     const all = switching && document.getElementById('edit-kaikki').checked;
     pushUndo();
+    // Where everything stood before the edit - the reflow below measures each
+    // show's original gap against it.
+    const before = new Map(currentSchedule.naytokset.map(x => [x.id, { alkaa: x.alkaa, kesto: x.kesto, sali: x.sali, paiva: x.paiva }]));
     n.alkaa  = newAlkaa;
     n.sali   = newSali;
+    let switched = [];
     if (switching) {
-      switchMovie(all ? currentSchedule.naytokset.filter(x => x.elokuvaId === oldId) : [n], newMovie);
+      switched = all ? currentSchedule.naytokset.filter(x => x.elokuvaId === oldId) : [n];
+      switchMovie(switched, newMovie);
       rosterAfterSwitch(oldId, newMovie.id);
     }
     n.loppuu = toHHMM(toMin(newAlkaa) + n.kesto);
     n.hinta  = isNaN(newHinta) ? n.hinta : newHinta;
+    const moves = switching ? reflowAfterSwitch(switched, before) : [];
     Storage.saveSchedule(currentSchedule);
     document.getElementById('edit-modal').classList.remove('open');
-    if (switching) {
-      buildWeekPanel(); // the roster changed too
-      renderGrid();
-      const clashes = currentSchedule.naytokset.filter(x => x.elokuvaId === newMovie.id &&
-        Scheduler.validateScreening(x, currentSchedule.naytokset, Storage.getSettings()).length > 0).length;
-      if (clashes) showWarning(`${clashes} ${newMovie.nimi} -näytöstä on nyt liian lähellä toista näytöstä - siirrä ne vapaaseen kohtaan.`);
-    } else {
-      renderGrid();
+    if (switching) buildWeekPanel(); // the roster changed too
+    renderGrid();
+    if (moves.length) {
+      alert(`${newMovie.nimi} on eri mittainen, joten ${moves.length === 1 ? 'yksi näytös siirtyi' : `${moves.length} näytöstä siirtyi`}:\n\n` +
+        moves.map(m => `${m.paiva} ${m.sali}: ${m.nimi} ${m.from.replace(':', '.')} → ${m.to.replace(':', '.')}${m.lateEnd ? ' (päättyy klo 24 jälkeen)' : ''}`).join('\n'));
     }
+  }
+
+  // After a movie switch changed some shows' length, the shows after them in
+  // the same room-day are moved so everything fits again. Rules, in order
+  // along each room's day:
+  //  - a show moves only if the one before it now ends at a different time;
+  //  - a longer film pushes the next show back only as far as needed to keep
+  //    the gap it had (capped at the room buffer, so a gap the user had
+  //    squeezed below the setting stays that tight rather than growing);
+  //  - a shorter film pulls the next show forward if the two were packed
+  //    back to back (gap within buffer + 14 min rounding), so the room stays
+  //    packed; a deliberate longer pause is left alone;
+  //  - a moved show that would start within minimivali_eri_sali of another
+  //    room's start steps later 15 min at a time until it's clear.
+  // Moves cascade down the room's day. Opening hours stretch to fit, as they
+  // do for a drag. Returns the moves so they can be announced.
+  function reflowAfterSwitch(switched, before) {
+    const settings = Storage.getSettings();
+    const gapSama = settings.minimivali_sama_sali;
+    const gapEri = settings.minimivali_eri_sali ?? 0;
+    const ceil15 = m => Math.ceil(m / 15) * 15;
+    const moves = [];
+    const roomDays = new Set(switched.map(x => x.paiva + '|' + x.sali));
+    roomDays.forEach(key => {
+      const [paiva, sali] = key.split('|');
+      const chain = currentSchedule.naytokset.filter(x => x.paiva === paiva && x.sali === sali)
+        .sort((a, b) => toMin(a.alkaa) - toMin(b.alkaa));
+      for (let i = 1; i < chain.length; i++) {
+        const pred = chain[i - 1], cur = chain[i];
+        const b = before.get(pred.id);
+        const stayed = b && b.paiva === paiva && b.sali === sali;
+        const prevOldEnd = stayed ? toMin(b.alkaa) + b.kesto : null;
+        const prevNewEnd = toMin(pred.alkaa) + pred.kesto;
+        if (prevOldEnd === prevNewEnd) continue;
+
+        const origStart = toMin(cur.alkaa);
+        const origGap = prevOldEnd != null ? origStart - prevOldEnd : gapSama;
+        const tight = ceil15(prevNewEnd + Math.max(0, Math.min(origGap, gapSama)));
+        let start;
+        if (prevOldEnd == null || prevNewEnd > prevOldEnd) start = Math.max(origStart, tight);
+        else start = origGap <= gapSama + 14 ? Math.min(origStart, tight) : origStart;
+        if (start === origStart) continue;
+
+        if (gapEri > 0) {
+          const collides = st => currentSchedule.naytokset.some(x =>
+            x.paiva === paiva && x.sali !== sali && Math.abs(toMin(x.alkaa) - st) < gapEri);
+          for (let guard = 0; guard < 12 && collides(start); guard++) start += 15;
+        }
+        moves.push({ paiva, sali, nimi: cur.nimi, from: cur.alkaa, to: toHHMM(start), lateEnd: start + cur.kesto > GRID_END });
+        cur.alkaa = toHHMM(start);
+        cur.loppuu = toHHMM(start + cur.kesto);
+        extendOpeningHours(paiva, start, start + cur.kesto);
+      }
+    });
+    const order = ['PE', 'LA', 'SU', 'MA', 'TI', 'KE', 'TO'];
+    return moves.sort((a, b) => order.indexOf(a.paiva) - order.indexOf(b.paiva) || a.sali.localeCompare(b.sali) || toMin(a.from) - toMin(b.from));
   }
 
   // Keeps the week's roster in step with a movie switch. The new movie takes
