@@ -575,6 +575,26 @@ select option {
   );
 }
 
+/* Why the spot under a dragged show is refused - see showDragReason() in
+   schedule-ui.js. Sits beside the dragged block and never takes the pointer. */
+.drag-reason {
+  position: fixed;
+  z-index: 60;
+  max-width: 360px;
+  padding: 7px 10px;
+  border-radius: 5px;
+  background: #1f2433;
+  color: #f1f3f9;
+  font-size: 0.78em;
+  line-height: 1.4;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.35);
+  pointer-events: none;
+}
+.drag-reason-title { font-weight: 700; color: #ff9d92; }
+.drag-reason-item { padding-left: 10px; text-indent: -10px; }
+.drag-reason-item::before { content: "• "; }
+.drag-reason-outcome { margin-top: 4px; padding-top: 4px; border-top: 1px solid rgba(255,255,255,0.18); color: #c9d1e6; }
+
 /* Live drag feedback - see onPointerMove in schedule-ui.js */
 .naytokset-block.live-dragging {
   z-index: 5;
@@ -584,8 +604,8 @@ select option {
 }
 /* The show cannot occupy the spot under the cursor. The drop still lands it on
    the nearest slot that fits (or reverts, if the room-day is full) - the block
-   keeps tracking the cursor either way, and its time label reads the start the
-   drop would actually give it. */
+   keeps tracking the cursor either way and its time label reads the cursor's
+   time; the note beside it (.drag-reason) says why and where it would land. */
 .naytokset-block.drag-invalid {
   background-color: #c0392b !important;
   color: #fff !important; /* overrides the movie's own inline text color, which may be black */
@@ -641,6 +661,12 @@ select option {
   border-radius: 6px;
   box-shadow: 0 2px 8px rgba(0,0,0,0.12);
   font-size: 0.88em;
+  /* Messages can run to two lines (what was in the way / what happened
+     instead, split by a newline); size to the text, up to a readable width. */
+  width: max-content;
+  max-width: min(860px, 92vw);
+  line-height: 1.45;
+  white-space: pre-line;
   opacity: 0;
   transition: opacity 0.3s;
   pointer-events: none;
@@ -719,50 +745,145 @@ tr.row-invalid td { background: #fef2f2; }
 .tuonti-status { font-size: 0.8em; color: #92400e; white-space: nowrap; }
 
 /* ── Settings panel ────────────────────────────────────────────── */
+/* Everything fits one laptop screen (1280x720 and up) without scrolling: the
+   tall hours table on the left, the four small cards in a 2x2 beside it (the
+   two with the long labels in the wider of its columns), and the save button
+   in a bar at the top right. The bar is sticky, so on a
+   window too small for all of it the button still never leaves the screen. */
+.settings-page { max-width: 1440px; }
+
+.settings-bar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  /* Bleeds over the panel's own top padding so nothing shows above it once stuck */
+  margin: -20px 0 0;
+  padding: 14px 0 10px;
+  background: var(--bg-body);
+}
+.settings-heading { font-size: 1.15em; font-weight: 600; margin-right: auto; }
+.settings-status { font-size: 0.85em; font-weight: 600; }
+.settings-status.unsaved { color: #b45309; }
+.settings-status.saved { color: #16a34a; }
+:root[data-theme="dark"] .settings-status.unsaved { color: #fbbf24; }
+:root[data-theme="dark"] .settings-status.saved { color: #4ade80; }
+
+.settings-layout {
+  display: grid;
+  grid-template-columns: minmax(560px, 640px) minmax(0, 1.4fr) minmax(0, 1fr);
+  grid-template-areas:
+    "tauto  tauto   tauto"
+    "hours  counts  kids"
+    "hours  texcel  texcel"
+    "hours  xcols   xhours";
+  grid-template-rows: auto auto auto 1fr;
+  gap: 10px 16px;
+  align-items: start;
+}
+.settings-layout .card { margin-bottom: 0; padding: 14px 16px; min-width: 0; }
+.sg-auto   { grid-area: tauto; }
+.sg-excel  { grid-area: texcel; }
+.sc-hours  { grid-area: hours; }
+.sc-counts { grid-area: counts; }
+.sc-kids   { grid-area: kids; }
+.sc-xhours { grid-area: xhours; }
+.sc-xcols  { grid-area: xcols; }
+/* The two top cards share a row; let them match heights so the Excel row
+   under them starts on one line. */
+.sc-counts, .sc-kids { align-self: stretch; }
+
 .settings-group-title {
   font-size: 0.82em;
   font-weight: 700;
   color: var(--text-muted-2);
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  margin: 22px 0 10px;
+  margin: 0;
 }
-.settings-group-title:first-child { margin-top: 0; }
+.sg-excel { margin-top: 6px; }
 
-.settings-grid { display: flex; gap: 16px; flex-wrap: wrap; }
-.settings-grid .card { flex: 1; min-width: 220px; }
+/* Narrower windows: the hours table takes the full width and the small cards
+   pair up under it. Scrolling is unavoidable here - the sticky bar covers it. */
+@media (max-width: 1180px) {
+  .settings-layout {
+    grid-template-columns: 1fr 1fr;
+    grid-template-areas:
+      "tauto  tauto"
+      "hours  hours"
+      "counts kids"
+      "texcel texcel"
+      "xcols  xhours";
+    grid-template-rows: auto;
+  }
+}
+@media (max-width: 640px) {
+  .settings-layout {
+    grid-template-columns: 1fr;
+    grid-template-areas: "tauto" "hours" "counts" "kids" "texcel" "xcols" "xhours";
+  }
+}
+
+/* One look for every field on the page */
+.settings-page input[type="time"],
+.settings-page input[type="number"] {
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 3px 6px;
+  font: inherit;
+  font-size: 0.92em;
+  background: var(--bg-input);
+  color: var(--text-main);
+}
+/* Time fields keep their natural width - it depends on the browser's
+   language (24 h "16.30" is narrower than "04:30 PM"). */
+.settings-page input[type="time"] { min-width: 74px; }
+.settings-page input[type="number"] { width: 64px; }
+.settings-page input:disabled { opacity: 0.55; }
+.settings-page input:focus { outline: none; border-color: #2563eb; }
 
 .hours-table-wrap { overflow-x: auto; }
 .hours-table { width: 100%; border-collapse: collapse; }
-.hours-table th, .hours-table td { padding: 5px 8px; font-size: 0.85em; }
-.hours-table th { color: var(--text-muted-2); font-weight: 600; text-align: left; }
-.hours-table input[type="time"] {
-  border: 1px solid var(--border-color);
-  border-radius: 3px;
-  padding: 3px 6px;
+.hours-table th, .hours-table td { padding: 3px 8px; font-size: 0.85em; }
+.hours-table th { color: var(--text-muted-2); font-weight: 600; text-align: left; vertical-align: bottom; padding-bottom: 6px; }
+.hours-table td:nth-child(2), .hours-table th:nth-child(2) { text-align: center; }
+
+/* Label on the left, field on the right, one pair per row */
+.set-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 7px 12px;
+  align-items: center;
+  font-size: 0.88em;
+}
+.set-fields > input { justify-self: end; }
+.set-sub {
+  grid-column: 1 / -1;
+  margin-top: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-lighter);
+  font-size: 0.86em;
+  font-weight: 700;
+  color: var(--text-muted-2);
+}
+.set-hint { grid-column: 1 / -1; margin-top: -2px; font-size: 0.86em; line-height: 1.35; color: var(--text-muted); }
+
+.day-checkboxes { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.day-checkboxes label { display: flex; align-items: center; gap: 3px; }
+
+.col-widths {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: repeat(4, auto);
+  grid-auto-flow: column;
+  gap: 6px 20px;
   font-size: 0.85em;
-  width: 90px;
-  background: var(--bg-input);
-  color: var(--text-main);
 }
-
-.kat-rules-table { width: 100%; border-collapse: collapse; }
-.kat-rules-table th, .kat-rules-table td { padding: 5px 6px; font-size: 0.83em; }
-.kat-rules-table th { color: var(--text-muted-2); font-weight: 600; text-align: left; }
-.kat-rules-table input[type="time"] {
-  border: 1px solid var(--border-color);
-  border-radius: 3px;
-  padding: 3px 5px;
-  font-size: 0.82em;
-  width: 82px;
-  background: var(--bg-input);
-  color: var(--text-main);
-}
-.day-checkboxes { display: flex; flex-wrap: wrap; gap: 4px; }
-.day-checkboxes label { font-size: 0.78em; display: flex; align-items: center; gap: 2px; }
-
-.gap-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; font-size: 0.88em; }
-.gap-row input { width: 60px; padding: 5px 8px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--bg-input); color: var(--text-main); }
+.col-widths label { display: flex; align-items: center; justify-content: space-between; gap: 8px; white-space: nowrap; }
+.col-widths b { display: inline-block; width: 1.1em; color: var(--text-muted-2); }
+.settings-page .col-widths input[type="number"] { width: 54px; }
 
 /* ── Toolbar row for ohjelmointi ───────────────────────────────── */
 .ohjelma-toolbar {

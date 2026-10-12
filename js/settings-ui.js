@@ -8,7 +8,7 @@ const SettingsUI = (() => {
     A: 'Sali',
     B: 'Päivä',
     C: 'Aika',
-    D: 'Elokuvan nimi',
+    D: 'Elokuva',
     E: 'Kesto',
     F: 'Ikäraja',
     G: 'Hinta',
@@ -18,20 +18,13 @@ const SettingsUI = (() => {
   function render() {
     const settings = Storage.getSettings();
 
-    // Column widths
-    const cwTbody = document.getElementById('col-widths-tbody');
-    cwTbody.innerHTML = '';
-    Object.entries(COL_NIMET).forEach(([col, nimi]) => {
-      const val = settings.sarakeleveydet?.[col] ?? 8;
-      const tr = document.createElement('tr');
-      tr.innerHTML = `
-        <td>${col} – ${nimi}</td>
-        <td><input type="number" class="col-width-input" data-col="${col}"
-             min="1" max="100" value="${val}"
-             style="width:55px;padding:3px 6px;border:1px solid #d0d6ea;border-radius:3px;font-size:0.85em"></td>
-      `;
-      cwTbody.appendChild(tr);
-    });
+    // Column widths - eight short fields, laid out two across (A-D | E-H)
+    // instead of an eight-row table, which alone made the page scroll.
+    const widths = document.getElementById('col-widths');
+    widths.innerHTML = Object.entries(COL_NIMET).map(([col, nimi]) => `
+      <label><span><b>${col}</b> ${nimi}</span>
+        <input type="number" class="col-width-input" data-col="${col}" min="1" max="100"
+               value="${settings.sarakeleveydet?.[col] ?? 8}"></label>`).join('');
 
     // Operating hours - unchecked days show (and use) the built-in default and
     // are disabled; checking "manuaalinen" pins that day to whatever's in the
@@ -50,8 +43,7 @@ const SettingsUI = (() => {
         <td><input type="time" data-paiva="${p}" data-field="avautuu" value="${h.avautuu}" ${manual ? '' : 'disabled'}></td>
         <td><input type="time" class="tavoite-input" data-paiva="${p}" value="${tavoite}"></td>
         <td><input type="time" data-paiva="${p}" data-field="sulkeutuu" value="${h.sulkeutuu}" ${manual ? '' : 'disabled'}></td>
-        <td><input type="number" class="paino-input" data-paiva="${p}" min="0" step="0.1" value="${paino}"
-             style="width:58px;padding:3px 6px"></td>
+        <td><input type="number" class="paino-input" data-paiva="${p}" min="0" step="0.1" value="${paino}"></td>
       `;
       tbody.appendChild(tr);
     });
@@ -74,6 +66,9 @@ const SettingsUI = (() => {
 
     // Lastenelokuva time window
     renderLastenRules(settings);
+
+    // The form now shows exactly what is stored.
+    setDirty(false);
   }
 
   function renderLastenRules(settings) {
@@ -88,25 +83,16 @@ const SettingsUI = (() => {
 
     const section = document.createElement('div');
     section.innerHTML = `
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-        <span class="badge badge-lastenelokuva">Lastenelokuva</span>
+      <div class="set-fields">
+        <label for="lasten-aikaisintaan">Aikaisintaan</label>
+        <input type="time" id="lasten-aikaisintaan" value="${lasten.aikaisintaan}">
+        <label for="lasten-viimeistaan">Viimeistään</label>
+        <input type="time" id="lasten-viimeistaan" value="${lasten.viimeistaan}">
+        <label for="lasten-hintaraja">Hinta (auto-tunnistus)</label>
+        <input type="number" id="lasten-hintaraja" min="0" step="0.5" value="${lasten.hintaraja ?? 12.5}">
+        <div class="set-sub">Esitetään päivinä</div>
+        <div class="day-checkboxes">${dayChecks}</div>
       </div>
-      <table class="kat-rules-table">
-        <tr>
-          <td style="width:120px;color:#666;font-size:0.83em">Aikaisintaan</td>
-          <td><input type="time" id="lasten-aikaisintaan" value="${lasten.aikaisintaan}"></td>
-        </tr>
-        <tr>
-          <td style="color:#666;font-size:0.83em">Viimeistään</td>
-          <td><input type="time" id="lasten-viimeistaan" value="${lasten.viimeistaan}"></td>
-        </tr>
-        <tr>
-          <td style="color:#666;font-size:0.83em">Hinta (auto-tunnistus)</td>
-          <td><input type="number" id="lasten-hintaraja" min="0" step="0.5" value="${lasten.hintaraja ?? 12.5}" style="width:82px"></td>
-        </tr>
-      </table>
-      <div style="margin-top:6px;font-size:0.82em;color:#666;margin-bottom:4px">Esitetään päivinä:</div>
-      <div class="day-checkboxes">${dayChecks}</div>
     `;
     container.appendChild(section);
   }
@@ -180,15 +166,54 @@ const SettingsUI = (() => {
 
     Storage.saveSettings(settings);
 
-    const msg = document.getElementById('asetukset-saved');
-    msg.style.display = 'inline';
-    setTimeout(() => { msg.style.display = 'none'; }, 2500);
+    setDirty(false);
+    const status = document.getElementById('asetukset-tila');
+    status.textContent = '✓ Tallennettu';
+    status.className = 'settings-status saved';
+    clearTimeout(savedTimer);
+    savedTimer = setTimeout(() => { if (!dirty) status.textContent = ''; }, 2500);
+  }
+
+  // ── Unsaved changes ───────────────────────────────────────────────────────
+  // Nothing on this page takes effect until it is saved, and the rest of the
+  // app reads only what is stored. So an edit that was never saved leaves the
+  // form showing one value while the schedule editor works with another - a
+  // gap setting typed as 15 while 45 is still in force, say. The page
+  // therefore always says when it holds unsaved edits, and they are settled
+  // before the user can get anywhere the old values would be used.
+  let dirty = false;
+  let savedTimer = null;
+
+  function setDirty(value) {
+    dirty = value;
+    const status = document.getElementById('asetukset-tila');
+    status.textContent = dirty ? '● Tallentamattomia muutoksia' : '';
+    status.className = 'settings-status' + (dirty ? ' unsaved' : '');
+  }
+
+  // Leaving the tab with unsaved edits: save them or drop them, the user's
+  // choice - never carry them along silently. (Dropping needs no work here:
+  // the form is rebuilt from storage the next time the tab opens.)
+  function leave() {
+    if (!dirty) return;
+    const saveThem = confirm(
+      'Asetuksissa on tallentamattomia muutoksia.\n\n' +
+      'OK = tallenna muutokset\nPeruuta = hylkää muutokset');
+    if (saveThem) save(); else setDirty(false);
   }
 
   function init() {
     document.getElementById('btn-tallenna-asetukset').addEventListener('click', save);
+    const panel = document.getElementById('asetukset-panel');
+    panel.addEventListener('input', () => setDirty(true));
+    panel.addEventListener('change', () => setDirty(true));
+    window.addEventListener('beforeunload', e => {
+      if (!dirty) return;
+      e.preventDefault();
+      e.returnValue = '';
+    });
     // Render on first load only if the tab is active (usually not)
   }
 
-  return { init, render };
+  return { init, render, leave };
 })();

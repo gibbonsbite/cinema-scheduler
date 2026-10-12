@@ -3,11 +3,9 @@
 const ScheduleUI = (() => {
   const SALAT = ['STUDIO 1', 'STUDIO 2', 'STUDIO 3'];
 
-  function addDays(isoDate, n) {
-    const d = new Date(isoDate);
-    d.setDate(d.getDate() + n);
-    return d.toISOString().slice(0, 10);
-  }
+  // Calendar-date math lives in scheduler.js, where it is done on UTC days
+  // so a daylight-saving change inside the week can't shift or drop a day.
+  const addDays = Scheduler.addDays;
   const GRID_START    = 9 * 60;  // 09:00 - matches the earliest default business-hours opening (MA/LA)
   const GRID_END      = 24 * 60; // 24:00
   const PX_PER_MIN    = 1.5;
@@ -606,21 +604,19 @@ const ScheduleUI = (() => {
     }
   }
 
+  // Today is the one place the local clock matters: "today" is the user's own
+  // calendar day (toISOString would give yesterday's date between midnight and
+  // 2-3 am Finnish time), and everything after that is calendar-date math.
   function nextFriday() {
-    const d = new Date();
-    const day = d.getDay(); // 0=Sun, 5=Fri
-    const diff = (5 - day + 7) % 7 || 7;
-    d.setDate(d.getDate() + diff);
-    return d.toISOString().slice(0, 10);
+    const now = new Date();
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const diff = (5 - now.getDay() + 7) % 7 || 7; // getDay: 0=Sun, 5=Fri
+    return addDays(today, diff);
   }
 
   function updateWeekLabel(isoAlku, isoLoppu) {
-    const start = new Date(isoAlku);
-    const end = new Date(isoLoppu);
-    const fmt = (dt) => `${String(dt.getDate()).padStart(2,'0')}.${String(dt.getMonth()+1).padStart(2,'0')}.${dt.getFullYear()}`;
-    const startDay = Scheduler.PAIVA_LYHYET[start.getDay()];
-    const endDay   = Scheduler.PAIVA_LYHYET[end.getDay()];
-    document.getElementById('viikko-label').textContent = `OHJELMISTO: ${startDay} ${fmt(start)} – ${endDay} ${fmt(end)}`;
+    const label = iso => `${Scheduler.weekdayOf(iso)} ${Scheduler.isoToFin(iso)}`;
+    document.getElementById('viikko-label').textContent = `OHJELMISTO: ${label(isoAlku)} – ${label(isoLoppu)}`;
   }
 
   // ── Auto-generate ─────────────────────────────────────────────────────────
@@ -1141,6 +1137,14 @@ const ScheduleUI = (() => {
     document.addEventListener('mouseup', onPointerUp);
   }
 
+  // The latest quarter-hour a show of this length can start and still end by
+  // the grid's end. Floored to the grid: clamping to the raw GRID_END - kesto
+  // put a 121-minute film dragged to the far right at 21.59, and the search
+  // for a free slot then stepped through 21.44, 21.29... - off-grid times that
+  // sit within the cross-room gap of nearly every other start, so late-evening
+  // drops landed hours away or were refused outright.
+  const latestStart = kesto => Math.floor((GRID_END - kesto) / 15) * 15;
+
   // Nearest start time in the target room+day where the show actually fits,
   // searching outward from where the cursor put it in 15-min steps. Later is
   // tried before earlier at equal distance: dropping onto the tail of another
@@ -1153,7 +1157,7 @@ const ScheduleUI = (() => {
   // that too is a question about this cell's day.
   function nearestFreeStart(base, wantedStart, kesto, settings) {
     const existing = currentSchedule?.naytokset ?? [];
-    const maxStart = GRID_END - kesto;
+    const maxStart = latestStart(kesto);
     if (maxStart < GRID_START) return null;
 
     const wanted = Math.max(GRID_START, Math.min(wantedStart, maxStart));
@@ -1172,8 +1176,31 @@ const ScheduleUI = (() => {
     return null;
   }
 
-  function snappedNotice(start) {
-    showWarning(`Ei tilaa haluttuun kohtaan - näytös siirrettiin lähimpään vapaaseen (${toHHMM(start).replace(':', '.')}).`);
+  // ── Saying why a spot was refused ────────────────────────────────────────
+  // Every show in the way of `wanted`, as the clauses validateScreening writes.
+  function refusalReasons(base, wanted, kesto, settings) {
+    return Scheduler.validateScreening(
+      { ...base, kesto, alkaa: toHHMM(wanted), loppuu: toHHMM(wanted + kesto) },
+      currentSchedule?.naytokset ?? [], settings);
+  }
+
+  const dot = min => toHHMM(min).replace(':', '.');
+
+  // "Ei mahtunut kohtaan 14.30: samassa salissa X alkaa 16.15 – väliin jäisi
+  // 18 min, tarvitaan 30 min." The first show in the way is spelled out; any
+  // others are counted.
+  function refusalText(candidate) {
+    const [first, ...rest] = candidate.reasons ?? [];
+    if (!first) return `Ei mahtunut kohtaan ${dot(candidate.wanted)}.`;
+    const more = rest.length ? ` (tiellä myös ${rest.length} ${rest.length === 1 ? 'muu näytös' : 'muuta näytöstä'})` : '';
+    return `Ei mahtunut kohtaan ${dot(candidate.wanted)}: ${first}${more}.`;
+  }
+
+  // After a drop that could not stay where it was put: what was in the way,
+  // then what happened to the show instead. `verb` is "siirrettiin" for a
+  // moved show and "lisättiin" for one dragged in from the list.
+  function snappedNotice(candidate, verb = 'siirrettiin') {
+    showWarning(`${refusalText(candidate)}\nNäytös ${verb} lähimpään vapaaseen kohtaan: ${dot(candidate.start)}.`);
   }
 
   // The cursor is over a spot this show cannot occupy - either it will slide to
@@ -1213,15 +1240,17 @@ const ScheduleUI = (() => {
       const newPaiva = dayCol.dataset.paiva;
       // Not clamped to the day's configured opening hours - dragging past them
       // is allowed, and extends that day's hours on drop (see onPointerUp).
-      const wanted = Math.max(GRID_START, Math.min(snappedStart, GRID_END - kesto));
+      const wanted = Math.max(GRID_START, Math.min(snappedStart, latestStart(kesto)));
 
       // The block tracks the cursor, so the drag stays direct - it is drawn
       // where you are pointing, not where it would end up. `start` is where the
       // drop will actually put it: `wanted` when that fits, otherwise the
       // nearest slot that does. The two differing is what turns the block red.
-      const fitted = nearestFreeStart({ id, sali: newSali, paiva: newPaiva }, wanted, kesto, settings);
+      const base = { id, sali: newSali, paiva: newPaiva };
+      const fitted = nearestFreeStart(base, wanted, kesto, settings);
       const start = fitted ?? wanted;
       candidate = { sali: newSali, paiva: newPaiva, start, wanted, valid: fitted != null, snapped: start !== wanted };
+      if (blockedAt(candidate)) candidate.reasons = refusalReasons(base, wanted, kesto, settings);
 
       // Snap into the target cell along the cross axis. Buffer offset is based
       // on the real kesto (matching renderGrid's static buffer-zone math), not
@@ -1246,16 +1275,68 @@ const ScheduleUI = (() => {
     // will slide it to `start`) or the whole room-day is full (the drop reverts).
     block.classList.toggle('drag-invalid', !!candidate && blockedAt(candidate));
     // The time shown is the spot under the cursor, red or not, so it always
-    // matches where the block is drawn. Where a red drop actually lands is
-    // reported by the warning bar once it's done (snappedNotice).
+    // matches where the block is drawn. Why a spot is red, and where the drop
+    // would land instead, is spelled out next to the block (showDragReason).
     const timeSpan = block.querySelector('.block-time');
     if (timeSpan && candidate) timeSpan.textContent = toHHMM(candidate.wanted).replace(':', '.');
+    showDragReason(block, horizontal, candidate);
+  }
+
+  // ── Why a dragged show is red ─────────────────────────────────────────────
+  // A small note pinned to the dragged block (or the list-drag ghost) whenever
+  // the spot under it is refused: every show in the way with the numbers
+  // (minutes that would be left, minutes required), then where the drop will
+  // put the show instead. The red bands only cover the cross-room rule - a
+  // refusal caused by the SAME room (the film would end less than the cleanup
+  // buffer before the next show) has no band, so without this the block was
+  // simply red over a spot that looked free.
+  let dragReasonEl = null;
+
+  function showDragReason(anchorEl, horizontal, candidate) {
+    if (!candidate || !blockedAt(candidate)) { hideDragReason(); return; }
+    const reasons = (candidate.reasons ?? []).map(r => r[0].toUpperCase() + r.slice(1));
+
+    if (!dragReasonEl) {
+      dragReasonEl = document.createElement('div');
+      dragReasonEl.className = 'drag-reason';
+      document.body.appendChild(dragReasonEl);
+    }
+    const line = (cls, text) => { const d = document.createElement('div'); d.className = cls; d.textContent = text; return d; };
+    const shown = reasons.slice(0, 3);
+    dragReasonEl.replaceChildren(
+      line('drag-reason-title', `Ei mahdu kohtaan ${dot(candidate.wanted)}`),
+      ...shown.map(r => line('drag-reason-item', r)),
+      ...(reasons.length > shown.length ? [line('drag-reason-item', `+ ${reasons.length - shown.length} muuta näytöstä`)] : []),
+      line('drag-reason-outcome', candidate.valid
+        ? `Pudotettaessa siirtyy lähimpään vapaaseen kohtaan: ${dot(candidate.start)}`
+        : 'Salissa ei ole tänä päivänä vapaata kohtaa - pudotus perutaan.'),
+    );
+
+    // Beside the block, on whichever side has room: under it when time runs
+    // sideways, to its right when time runs downward.
+    const a = anchorEl.getBoundingClientRect();
+    const w = dragReasonEl.offsetWidth, h = dragReasonEl.offsetHeight, m = 6;
+    let left, top;
+    if (horizontal) {
+      left = a.left;
+      top = a.bottom + m + h <= window.innerHeight ? a.bottom + m : a.top - m - h;
+    } else {
+      left = a.right + m + w <= window.innerWidth ? a.right + m : a.left - m - w;
+      top = a.top;
+    }
+    dragReasonEl.style.left = Math.max(m, Math.min(left, window.innerWidth - w - m)) + 'px';
+    dragReasonEl.style.top = Math.max(m, Math.min(top, window.innerHeight - h - m)) + 'px';
+  }
+
+  function hideDragReason() {
+    if (dragReasonEl) { dragReasonEl.remove(); dragReasonEl = null; }
   }
 
   function onPointerUp() {
     if (!dragState) return;
     document.removeEventListener('mousemove', onPointerMove);
     document.removeEventListener('mouseup', onPointerUp);
+    hideDragReason();
 
     const { id, lastCandidate } = dragState;
     // No cleanup needed for block/buf - renderGrid() below wipes and rebuilds
@@ -1276,10 +1357,10 @@ const ScheduleUI = (() => {
         };
         Storage.saveSchedule(currentSchedule);
         extendOpeningHours(lastCandidate.paiva, lastCandidate.start, lastCandidate.start + n.kesto);
-        if (lastCandidate.snapped) snappedNotice(lastCandidate.start);
+        if (lastCandidate.snapped) snappedNotice(lastCandidate);
       }
     } else if (lastCandidate) {
-      showWarning('Salissa ei ole vapaata kohtaa tänä päivänä - siirto peruttu.');
+      showWarning(`${refusalText(lastCandidate)}\nSalissa ei ole tänä päivänä yhtään vapaata kohtaa, joten siirto peruttiin.`);
     }
 
     dragState = null;
@@ -1332,16 +1413,18 @@ const ScheduleUI = (() => {
     const dayColRect = dayCol.getBoundingClientRect();
     const relPos = horizontal ? e.clientX - dayColRect.left : e.clientY - dayColRect.top;
     const snappedStart = round15(GRID_START + (relPos - headerOffset) / PX_PER_MIN);
-    const wanted = Math.max(GRID_START, Math.min(snappedStart, GRID_END - movie.kesto));
+    const wanted = Math.max(GRID_START, Math.min(snappedStart, latestStart(movie.kesto)));
 
     const base = { id: '__preview__', sali: dayCol.dataset.sali, paiva: dayCol.dataset.paiva };
     const fitted = nearestFreeStart(base, wanted, movie.kesto, settings);
     const start = fitted ?? wanted;
     const candidate = { sali: base.sali, paiva: base.paiva, start, wanted, valid: fitted != null, snapped: start !== wanted, movieId: movie.id };
+    if (blockedAt(candidate)) candidate.reasons = refusalReasons(base, wanted, movie.kesto, settings);
 
     // Ghost sits under the cursor and reddens where the show cannot go, exactly
     // like a block being moved, and its label reads the cursor's time too.
     showGridDropPreview(dayCol, horizontal, headerOffset, wanted, movie.kesto, blockedAt(candidate));
+    showDragReason(gridGhostEl, horizontal, candidate);
     gridDropCandidate = candidate;
   }
 
@@ -1363,6 +1446,7 @@ const ScheduleUI = (() => {
   function clearGridDropPreview() {
     if (gridGhostEl && gridGhostEl.parentElement) gridGhostEl.parentElement.removeChild(gridGhostEl);
     gridDropCandidate = null;
+    hideDragReason();
   }
 
   function onGridDrop(e) {
@@ -1372,7 +1456,10 @@ const ScheduleUI = (() => {
     const candidate = gridDropCandidate;
     clearGridDropPreview();
     if (!candidate) return;
-    if (!candidate.valid) { showWarning('Salissa ei ole vapaata kohtaa tänä päivänä.'); return; }
+    if (!candidate.valid) {
+      showWarning(`${refusalText(candidate)}\nSalissa ei ole tänä päivänä yhtään vapaata kohtaa, joten näytöstä ei lisätty.`);
+      return;
+    }
 
     const movie = Library.getAll().find(m => m.id === candidate.movieId);
     if (!movie) return;
@@ -1408,7 +1495,7 @@ const ScheduleUI = (() => {
     Storage.saveSchedule(currentSchedule);
     renderGrid();
     refreshNaytosPreview();
-    if (candidate.snapped) snappedNotice(candidate.start);
+    if (candidate.snapped) snappedNotice(candidate, 'lisättiin');
   }
 
   // ── Context menu (right-click) ────────────────────────────────────────────
@@ -1657,11 +1744,16 @@ const ScheduleUI = (() => {
     }
   }
 
+  // The message stays up long enough to be read - longer for a longer one -
+  // and a new message restarts the clock rather than inheriting the old
+  // message's, which used to hide a second warning early.
+  let warningTimer = null;
   function showWarning(msg) {
     const bar = document.getElementById('warning-bar');
     bar.textContent = '⚠️ ' + msg;
     bar.classList.add('visible');
-    setTimeout(() => bar.classList.remove('visible'), 5000);
+    clearTimeout(warningTimer);
+    warningTimer = setTimeout(() => bar.classList.remove('visible'), Math.min(15000, Math.max(5000, msg.length * 75)));
   }
 
   // ── Init ──────────────────────────────────────────────────────────────────

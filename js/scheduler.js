@@ -4,16 +4,39 @@ const Scheduler = (() => {
   const SALAT = ['STUDIO 1', 'STUDIO 2', 'STUDIO 3'];
   const PAIVA_LYHYET = ['SU', 'MA', 'TI', 'KE', 'TO', 'PE', 'LA']; // indexed by JS getDay()
 
+  // ── Calendar dates ──────────────────────────────────────────────────────
+  // A week's dates are plain calendar days ("2026-10-23"), with no time of
+  // day and no time zone, so all arithmetic on them is done on UTC midnights
+  // and never touches the local clock. Mixing the two (a UTC-parsed date
+  // stepped with the local setDate/getDay) silently dropped a day whenever a
+  // week crossed a daylight-saving change: in Finnish time the week of
+  // 23-29.10.2026 came out without its Thursday, and a week across the March
+  // change would have ended a day early.
+  const DAY_MS = 86400000;
+  function isoToUtc(iso) {
+    const [y, m, d] = String(iso).split('-').map(Number);
+    return Date.UTC(y, m - 1, d);
+  }
+  function addDays(iso, n) {
+    return new Date(isoToUtc(iso) + n * DAY_MS).toISOString().slice(0, 10);
+  }
+  function weekdayOf(iso) {
+    return PAIVA_LYHYET[new Date(isoToUtc(iso)).getUTCDay()];
+  }
+  // "2026-10-23" -> "23.10.2026"
+  function isoToFin(iso) {
+    const [y, m, d] = String(iso).split('-');
+    return `${d}.${m}.${y}`;
+  }
+
   // Returns Finnish day-code array for each calendar day from isoAlku to isoLoppu (inclusive).
   // Defaults to 7 days if isoLoppu is omitted.
   function getPaivat(isoAlku, isoLoppu) {
-    const start = new Date(isoAlku);
-    const end = isoLoppu ? new Date(isoLoppu) : new Date(+start + 6 * 86400000);
+    const start = isoToUtc(isoAlku);
+    const end = isoLoppu ? isoToUtc(isoLoppu) : start + 6 * DAY_MS;
     const days = [];
-    const d = new Date(start);
-    while (d <= end && days.length < 14) {
-      days.push(PAIVA_LYHYET[d.getDay()]);
-      d.setDate(d.getDate() + 1);
+    for (let t = start; t <= end && days.length < 14; t += DAY_MS) {
+      days.push(PAIVA_LYHYET[new Date(t).getUTCDay()]);
     }
     return days;
   }
@@ -618,12 +641,21 @@ const Scheduler = (() => {
   //    generator's stagger pass uses, so a hand-moved show obeys exactly what
   //    the generator was asked to. schedule-ui.js draws these no-start bands
   //    while dragging (drawEriSaliZones).
+  //
+  // Returns one clause per conflicting show, written to be shown to the user
+  // (the drag note and the drop message both do, after "Ei mahtunut kohtaan
+  // 14.30: "). Each names the show in the way and gives the numbers: how many
+  // minutes would be left between the two and how many the setting requires.
+  // A bare "no room" told the user nothing when the spot LOOKED free - the
+  // usual case being a film that would end less than the cleanup buffer
+  // before the same room's next show.
   function validateScreening(naytos, allNaytokset, settings) {
     const warnings = [];
     const startMin = toMin(naytos.alkaa);
     const endMin = startMin + naytos.kesto;
     const gapSama = settings.minimivali_sama_sali;
     const gapEri = settings.minimivali_eri_sali ?? 0;
+    const dot = hhmm => hhmm.replace(':', '.');
 
     const today = allNaytokset.filter(n => n.id !== naytos.id && n.paiva === naytos.paiva);
     today.forEach(n => {
@@ -631,15 +663,21 @@ const Scheduler = (() => {
       if (n.sali === naytos.sali) {
         const nEnd = nStart + n.kesto;
         if (startMin < nEnd + gapSama && endMin + gapSama > nStart) {
-          warnings.push(`Päällekkäisyys: ${n.nimi}`);
+          if (startMin < nEnd && endMin > nStart) {
+            warnings.push(`menisi päällekkäin, samassa salissa on ${n.nimi} ${dot(n.alkaa)}–${dot(toHHMM(nEnd))}`);
+          } else if (nStart >= endMin) {
+            warnings.push(`samassa salissa ${n.nimi} alkaa ${dot(n.alkaa)} – väliin jäisi ${nStart - endMin} min, tarvitaan ${gapSama} min`);
+          } else {
+            warnings.push(`samassa salissa ${n.nimi} päättyy ${dot(toHHMM(nEnd))} – väliin jäisi ${startMin - nEnd} min, tarvitaan ${gapSama} min`);
+          }
         }
       } else if (gapEri > 0 && Math.abs(nStart - startMin) < gapEri) {
-        warnings.push(`Liian lähellä toisen salin alkua: ${n.nimi} (${n.sali} ${n.alkaa})`);
+        warnings.push(`${n.sali}: ${n.nimi} alkaa ${dot(n.alkaa)} – eri salien alkujen väliin jäisi ${Math.abs(nStart - startMin)} min, tarvitaan ${gapEri} min`);
       }
     });
 
     return warnings;
   }
 
-  return { schedule, validateScreening, toMin, toHHMM, round15, getPaivat, PAIVA_LYHYET, SALAT };
+  return { schedule, validateScreening, toMin, toHHMM, round15, getPaivat, addDays, weekdayOf, isoToFin, PAIVA_LYHYET, SALAT };
 })();

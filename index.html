@@ -123,81 +123,74 @@
 <!-- TAB 3: ASETUKSET                                                       -->
 <!-- ══════════════════════════════════════════════════════════════════════ -->
 <section id="asetukset-panel" class="tab-panel">
+  <div class="settings-page">
 
-  <h3 class="settings-group-title">Automaattinen ohjelmointi</h3>
-  <div class="settings-grid">
-
-    <!-- Operating hours -->
-    <div class="card" style="flex:0 1 580px">
-      <div class="card-title">Aukioloajat</div>
-      <p class="card-hint">Aikaisin aloitus on turvaraja ja "viimeinen näytös alkaa" on illan ankkuri, johon ohjelma rakennetaan. Avaustavoite on aika, johon mennessä päivän ensimmäisen näytöksen halutaan alkavan &ndash; jos päivä jäisi lyhyemmäksi, sille lisätään näytöksiä. Painotus kertoo kuinka paljon näytöksiä päivä saa suhteessa muihin päiviin (vain suhteilla on väliä).</p>
-      <div class="hours-table-wrap">
-        <table class="hours-table">
-          <thead><tr><th>Päivä</th><th>Manuaalinen</th><th>Aikaisin aloitus</th><th>Avaustavoite</th><th>Viimeinen näytös alkaa</th><th>Painotus</th></tr></thead>
-          <tbody id="hours-tbody"></tbody>
-        </table>
-      </div>
+    <!-- Always at the top right, and sticky, so saving never needs a scroll -->
+    <div class="settings-bar">
+      <h2 class="settings-heading">Asetukset</h2>
+      <span id="asetukset-tila" class="settings-status" role="status" aria-live="polite"></span>
+      <button class="btn btn-primary" id="btn-tallenna-asetukset">Tallenna asetukset</button>
     </div>
 
-    <!-- Show counts and gaps -->
-    <div class="card" style="flex:0 0 260px">
-      <div class="card-title">Näytösmäärät ja -välit</div>
-      <div class="gap-row">
-        <label>Näytöksiä viikossa (tavoite):</label>
-        <input type="number" id="viikko-naytokset" min="1" max="99" style="width:60px">
+    <div class="settings-layout">
+
+      <h3 class="settings-group-title sg-auto">Automaattinen ohjelmointi</h3>
+
+      <!-- Operating hours -->
+      <div class="card sc-hours">
+        <div class="card-title">Aukioloajat</div>
+        <p class="card-hint">Aikaisin aloitus on turvaraja ja "viimeinen näytös alkaa" on illan ankkuri, johon ohjelma rakennetaan. Avaustavoite on aika, johon mennessä päivän ensimmäisen näytöksen halutaan alkavan &ndash; jos päivä jäisi lyhyemmäksi, sille lisätään näytöksiä. Painotus kertoo kuinka paljon näytöksiä päivä saa suhteessa muihin päiviin (vain suhteilla on väliä).</p>
+        <div class="hours-table-wrap">
+          <table class="hours-table">
+            <thead><tr><th>Päivä</th><th>Manuaalinen</th><th>Aikaisin aloitus</th><th>Avaustavoite</th><th>Viimeinen näytös alkaa</th><th>Painotus</th></tr></thead>
+            <tbody id="hours-tbody"></tbody>
+          </table>
+        </div>
       </div>
-      <div class="gap-row">
-        <label>Näytöksiä vähintään / sali / päivä:</label>
-        <input type="number" id="min-per-sali" min="0" max="6" style="width:60px">
+
+      <!-- Show counts and gaps -->
+      <div class="card sc-counts">
+        <div class="card-title">Näytösmäärät ja -välit</div>
+        <div class="set-fields">
+          <label for="viikko-naytokset">Näytöksiä viikossa (tavoite)</label>
+          <input type="number" id="viikko-naytokset" min="1" max="99">
+          <label for="min-per-sali">Näytöksiä vähintään / sali / päivä</label>
+          <input type="number" id="min-per-sali" min="0" max="6">
+          <div class="set-sub">Vähimmäisvälit (min)</div>
+          <label for="gap-sama">Sama sali: tauko näytösten välissä</label>
+          <input type="number" id="gap-sama" min="0" max="60">
+          <label for="gap-eri">Eri salit: alkujen väli</label>
+          <input type="number" id="gap-eri" min="0" max="60">
+          <p class="set-hint">Eri salien näytökset eivät ala tätä lähempänä toisiaan. 0 = ei rajoitusta.</p>
+        </div>
       </div>
-      <div class="gap-row">
-        <label>Sama sali (min):</label>
-        <input type="number" id="gap-sama" min="0" max="60" style="width:60px">
+
+      <!-- Kids' movie window -->
+      <div class="card sc-kids">
+        <div class="card-title">Lastenelokuvan aikaikkuna</div>
+        <div id="kat-rules-container"></div>
       </div>
-      <div class="gap-row">
-        <label>Eri salit (min):</label>
-        <input type="number" id="gap-eri" min="0" max="60" style="width:60px">
+
+      <h3 class="settings-group-title sg-excel">Excel-vienti</h3>
+
+      <!-- Column widths -->
+      <div class="card sc-xcols">
+        <div class="card-title">Sarakeleveydet (Excel)</div>
+        <div class="col-widths" id="col-widths"></div>
       </div>
+
+      <!-- Opening times for Excel -->
+      <div class="card sc-xhours">
+        <div class="card-title">Aukioloajat (Excel)</div>
+        <div class="set-fields">
+          <label for="aukiolo-ennen">Avataan ennen ensimmäistä (min)</label>
+          <input type="number" id="aukiolo-ennen" min="0" max="120">
+          <label for="aukiolo-sulku">Suljetaan (min) viimeisen alusta</label>
+          <input type="number" id="aukiolo-sulku" min="-120" max="120">
+        </div>
+      </div>
+
     </div>
-
-    <!-- Category rules -->
-    <div class="card" style="flex:1;min-width:300px">
-      <div class="card-title">Lastenelokuvan aikaikkuna</div>
-      <div id="kat-rules-container"></div>
-    </div>
-
-  </div>
-
-  <h3 class="settings-group-title">Excel-vienti</h3>
-  <div class="settings-grid">
-
-    <!-- Opening times for Excel -->
-    <div class="card" style="flex:0 0 260px">
-      <div class="card-title">Aukioloajat (Excel)</div>
-      <div class="gap-row">
-        <label>Avataan ennen ensimmäistä (min):</label>
-        <input type="number" id="aukiolo-ennen" min="0" max="120" style="width:55px">
-      </div>
-      <div class="gap-row">
-        <label>Suljetaan (min) viimeisen alusta:</label>
-        <input type="number" id="aukiolo-sulku" min="-120" max="120" style="width:55px">
-      </div>
-    </div>
-
-    <!-- Column widths -->
-    <div class="card" style="flex:0 0 220px">
-      <div class="card-title">Sarakeleveydet (Excel)</div>
-      <table class="hours-table">
-        <thead><tr><th>Sarake</th><th>Leveys</th></tr></thead>
-        <tbody id="col-widths-tbody"></tbody>
-      </table>
-    </div>
-
-  </div>
-
-  <div style="margin-top:16px">
-    <button class="btn btn-primary" id="btn-tallenna-asetukset">Tallenna asetukset</button>
-    <span id="asetukset-saved" style="margin-left:10px;color:#16a34a;font-size:0.85em;display:none">✓ Tallennettu</span>
   </div>
 </section>
 
@@ -385,6 +378,10 @@
   document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       const tab = btn.dataset.tab;
+      // Unsaved settings are settled (saved or dropped, the user's call) before
+      // another tab can run on values that differ from what Asetukset shows.
+      const from = document.querySelector('.tab-btn.active')?.dataset.tab;
+      if (from === 'asetukset' && tab !== 'asetukset') SettingsUI.leave();
       document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
       document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
       btn.classList.add('active');

@@ -259,6 +259,14 @@ const Storage = (() => {
       }
       if (saved.sarakeleveydet) merged.sarakeleveydet = Object.assign(merged.sarakeleveydet, saved.sarakeleveydet);
       if (saved.aukiolo_excel) merged.aukiolo_excel = Object.assign(merged.aukiolo_excel, saved.aukiolo_excel);
+      // The scheduler adds these to minute counts, so one stored as text
+      // ("30", from a hand-edited backup or an old build) would concatenate
+      // instead - "1000" + "30" - and make every slot look taken. Anything
+      // that isn't a usable number falls back to the default.
+      for (const key of ['naytoksia_viikossa', 'min_naytoksia_salissa', 'minimivali_sama_sali', 'minimivali_eri_sali']) {
+        const value = typeof merged[key] === 'string' && merged[key].trim() !== '' ? Number(merged[key]) : merged[key];
+        merged[key] = typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : DEFAULTS.settings[key];
+      }
       return merged;
     },
     saveSettings: (settings) => save(KEYS.SETTINGS, settings),

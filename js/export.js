@@ -14,25 +14,17 @@ const Exporter = (() => {
     return (h * 60 + m) / 1440;
   }
 
-  // Finnish date string from ISO date + offset days
-  function isoToPaiva(iso, offsetDays) {
-    const d = new Date(iso);
-    d.setDate(d.getDate() + offsetDays);
-    const dd = String(d.getDate()).padStart(2, '0');
-    const mm = String(d.getMonth() + 1).padStart(2, '0');
-    const yy = d.getFullYear();
-    return `${dd}.${mm}.${yy}`;
-  }
-
   function exportToExcel(schedule) {
     const { viikkoAlku, viikkoLoppu, naytokset } = schedule;
     const paivat = Scheduler.getPaivat(viikkoAlku, viikkoLoppu);
 
-    const isoLoppu = viikkoLoppu || (() => { const d = new Date(viikkoAlku); d.setDate(d.getDate() + 6); return d.toISOString().slice(0, 10); })();
-    const startDay = Scheduler.PAIVA_LYHYET[new Date(viikkoAlku).getDay()];
-    const endDay   = Scheduler.PAIVA_LYHYET[new Date(isoLoppu).getDay()];
-    const startFin = isoToPaiva(viikkoAlku, 0);
-    const endFin   = isoToPaiva(isoLoppu, 0);
+    // Date math goes through Scheduler's calendar-date helpers (time-zone and
+    // daylight-saving proof - see scheduler.js).
+    const isoLoppu = viikkoLoppu || Scheduler.addDays(viikkoAlku, 6);
+    const startDay = Scheduler.weekdayOf(viikkoAlku);
+    const endDay   = Scheduler.weekdayOf(isoLoppu);
+    const startFin = Scheduler.isoToFin(viikkoAlku);
+    const endFin   = Scheduler.isoToFin(isoLoppu);
     const title = `OHJELMISTO: ${startDay} ${startFin} - ${endDay} ${endFin}`;
 
     const settings = Storage.getSettings();
