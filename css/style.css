@@ -217,13 +217,17 @@ body {
 
 /* ── Scheduling panel ──────────────────────────────────────────── */
 #ohjelmointi-panel { display: none; }
-#ohjelmointi-panel.active { display: flex; gap: 16px; flex-wrap: wrap; }
+/* List and grid stay side by side down to small windows (half a laptop
+   screen included) - the grid scrolls inside its own box instead of the
+   whole schedule wrapping below the list. Only a phone-narrow window stacks. */
+#ohjelmointi-panel.active { display: flex; gap: 16px; flex-wrap: nowrap; align-items: flex-start; }
+@media (max-width: 640px) { #ohjelmointi-panel.active { flex-wrap: wrap; } }
 
 /* The whole left column is one card - week, movie list and the Excel
    buttons on a single background. */
 .viikko-setup {
-  flex: 0 0 290px;
-  min-width: 250px;
+  flex: 0 1 290px;
+  min-width: 230px;
   align-self: flex-start;
 }
 .viikko-setup .form-row.half > div { flex: 1 1 0; min-width: 0; }
@@ -289,12 +293,16 @@ body {
    (theater checkboxes, delete) sit on their own second row, indented to
    align under the title. */
 .elokuva-rivi {
-  padding: 5px 4px;
-  border-bottom: 1px solid var(--border-lightest);
+  padding: 6px 8px 7px 4px;
+  margin-bottom: 5px;
+  border-radius: 6px;
   font-size: 0.85em;
   cursor: grab;
+  /* the movie's grid color, set per row by buildWeekPanel */
+  background: var(--blk-bg, var(--bg-card-alt));
+  color: var(--blk-fg, var(--text-main));
 }
-.elokuva-rivi:last-child { border-bottom: none; }
+.elokuva-rivi:last-child { margin-bottom: 0; }
 .elokuva-rivi.dragging { opacity: 0.4; }
 .elokuva-rivi-main { display: flex; align-items: center; gap: 5px; min-width: 0; }
 .elokuva-rivi-main strong {
@@ -302,21 +310,21 @@ body {
   white-space: normal;
   word-break: break-word;
   line-height: 1.3;
-  padding: 2px 7px;
-  border-radius: 4px; /* colored via inline style with the movie's own grid color - a mini schedule block */
+  padding: 1px 2px;
 }
 .elokuva-rivi-controls {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin: 2px 0 0 30px; /* aligns under the title (past handle + rank) */
+  gap: 5px;
+  margin: 4px 0 0 24px; /* aligns under the title (past the handle) */
 }
 .btn-poista-viikosta { margin-left: auto; }
 
 .lista-tyhja { color: var(--text-muted); font-size: 0.85em; padding: 10px 2px 4px; }
 .btn-block { display: block; width: 100%; margin-bottom: 8px; }
 .elokuva-rivi .drag-handle {
-  color: #b6bdd0;
+  color: inherit;
+  opacity: 0.55;
   flex-shrink: 0;
   font-size: 1.5em;
   line-height: 1;
@@ -331,17 +339,41 @@ body {
   min-width: 1.4em;
 }
 
-/* The theaters a movie plays this week (the plan's `salit`) */
-.sali-check {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  font-size: 0.92em;
-  color: var(--text-main);
-  cursor: pointer;
+/* Which theaters the movie is in this week - indicators, set on the
+   Suunnittelu page. Translucent over the row's own color so they read on
+   any movie color. */
+.sali-merkki {
+  padding: 1px 7px;
+  border-radius: 10px;
+  font-size: 0.88em;
+  font-weight: 700;
+  background: rgba(255, 255, 255, 0.32);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12);
   white-space: nowrap;
 }
-.sali-check input { margin: 0; cursor: pointer; }
+.sali-merkki.ei-salia { font-weight: 600; font-style: italic; opacity: 0.8; }
+.elokuva-rivi .btn-poista-viikosta { filter: grayscale(0.2); opacity: 0.85; }
+.elokuva-rivi .btn-poista-viikosta:hover { opacity: 1; }
+
+/* Finnish age ratings in the official symbols' colors */
+.ikaraja-badge {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding: 1px 6px;
+  border-radius: 10px;
+  font-size: 0.82em;
+  font-weight: 800;
+  letter-spacing: 0.2px;
+  color: #fff;
+  background: #6b7280;
+  box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.85);
+  white-space: nowrap;
+}
+.ikaraja-badge[data-ika="S"]  { background: #2e9e47; }
+.ikaraja-badge[data-ika="7"]  { background: #f2c200; color: #1f2937; }
+.ikaraja-badge[data-ika="12"] { background: #f08a24; }
+.ikaraja-badge[data-ika="16"] { background: #e0313b; }
+.ikaraja-badge[data-ika="18"] { background: #111; }
 
 /* Native dropdown popups derive their surface from the select's own
    background - a semi-transparent one (the dark-mode .overridden state)
@@ -355,9 +387,35 @@ select option {
 }
 
 .ohjelma-area {
-  flex: 1 1 600px;
+  flex: 1 1 0;
   min-width: 0;
 }
+
+/* Theater tabs above the vertical grid - see renderSaliTabs() */
+.sali-tabit { display: flex; gap: 2px; margin-bottom: -1px; position: relative; z-index: 1; }
+.sali-tabit[hidden] { display: none; }
+.sali-tab {
+  padding: 7px 16px;
+  border: 1px solid var(--border-light);
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+  background: var(--bg-card-alt);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 0.85em;
+  font-weight: 700;
+  cursor: pointer;
+}
+.sali-tab:hover { color: var(--text-main); }
+.sali-tab.active { background: var(--bg-card); color: var(--text-main); box-shadow: inset 0 3px 0 #2563eb; }
+.sali-tab.drop-hover { color: #fff; background: #2563eb; border-color: #2563eb; }
+.sali-tab.drop-hover .sali-tab-n { background: rgba(255,255,255,0.25); }
+.sali-tab-n { margin-left: 4px; padding: 0 6px; border-radius: 8px; background: var(--border-lighter); font-size: 0.9em; }
+.sali-tabit:not([hidden]) + #aikataulu-grid { border-top-left-radius: 0; }
+/* A single theater's seven days fill the whole width */
+#aikataulu-grid.yksi-sali .day-col { min-width: 0; }
+#aikataulu-grid.yksi-sali .sali-header { display: none; }
+#aikataulu-grid.yksi-sali .time-axis { margin-top: 0; }
 
 /* ── Timeline grid ─────────────────────────────────────────────── */
 /* Default orientation ("pysty"): time flows downward, theaters are columns,
@@ -445,22 +503,26 @@ select option {
 }
 .suunta-vaaka .sali-lane { flex-direction: column; }
 
-.hour-line {
-  position: absolute;
-  left: 0;
-  right: 0;
-  height: 1px;
-  background: var(--border-lighter);
-  pointer-events: none;
-  z-index: 0;
-}
 
 .day-col {
   flex: 1;
   position: relative;
-  background: var(--bg-card);
   min-width: 60px;
   overflow: hidden;
+  /* Hour lines, every 60 min = 90 px (PX_PER_MIN 1.5), the first at 10.00:
+     drawn as the cell's background rather than as elements. --hour-offset
+     (set per cell by renderGrid) skips the day header. */
+  background-color: var(--bg-card);
+  background-image: linear-gradient(to bottom, var(--border-lighter) 0 1px, transparent 1px);
+  background-size: 100% 90px;
+  background-position: 0 calc(var(--hour-offset, 14px) + 90px);
+  background-repeat: repeat-y;
+}
+.suunta-vaaka .day-col {
+  background-image: linear-gradient(to right, var(--border-lighter) 0 1px, transparent 1px);
+  background-size: 90px 100%;
+  background-position: calc(var(--hour-offset, 30px) + 90px) 0;
+  background-repeat: repeat-x;
 }
 .suunta-vaaka .day-col {
   display: flex;
@@ -471,7 +533,7 @@ select option {
 }
 /* An empty week still draws its full grid, so mark the day cells as the drop
    targets they are rather than leaving a blank slate that looks broken. */
-.grid-tyhja .day-col { background: var(--bg-card-alt); }
+.grid-tyhja .day-col { background-color: var(--bg-card-alt); }
 
 .day-header {
   text-align: center;
@@ -513,10 +575,12 @@ select option {
   cursor: grab;
   user-select: none;
   z-index: 2;
-  filter: drop-shadow(0 1px 1.5px rgba(0,0,0,0.25));
   transition: opacity 0.1s;
 }
-.naytokset-block:hover { opacity: 0.92; filter: drop-shadow(0 1px 1.5px rgba(0,0,0,0.25)) brightness(1.05); }
+.naytokset-block:hover { opacity: 0.92; }
+/* A plain box shadow under the body: a drop-shadow filter on every block
+   made each one its own composited layer and every repaint dearer. */
+.naytokset-block .block-body { box-shadow: 0 1px 2px rgba(0,0,0,0.22); }
 
 .block-tab {
   flex: 0 0 auto;
@@ -542,6 +606,33 @@ select option {
   text-shadow: 0 1px 1px rgba(0,0,0,0.2), 0 1px 1px rgba(255,255,255,0.2);
 }
 .block-lasten { font-size: 0.8em; line-height: 1; flex: 0 0 auto; }
+
+/* All three theaters side by side in the vertical view: the columns are too
+   narrow for text written across, so the folder turns on its side - the
+   title tab runs down the block's left edge and the showtime reads top to
+   bottom beside it (see renderGrid's `sideways`). */
+.naytokset-block.pysty-teksti { flex-direction: row; align-items: flex-start; }
+.naytokset-block.pysty-teksti .block-tab {
+  writing-mode: vertical-rl;
+  width: 18px;
+  height: auto;
+  max-width: none;
+  max-height: 100%;
+  padding: 6px 0 14px;
+  border-radius: 5px 0 0 0;
+  clip-path: polygon(0 0, 100% 0, 100% calc(100% - 9px), 0 100%);
+}
+.naytokset-block.pysty-teksti .block-body,
+#aikataulu-grid .naytokset-block.pysty-teksti .block-body { /* beats the vertical view's top-aligned body */
+  writing-mode: vertical-rl;
+  align-self: stretch;
+  flex: 1 1 auto;
+  min-width: 0;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 6px 0;
+}
+.naytokset-block.pysty-teksti .block-time { font-size: 19px; }
 /* Time runs downward in the vertical layout: the showtime sits at the top
    of the body, where the show starts, not in the middle of a tall block. */
 #aikataulu-grid:not(.suunta-vaaka) .block-body { align-items: flex-start; padding-top: 5px; }

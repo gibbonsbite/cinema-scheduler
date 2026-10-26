@@ -125,6 +125,7 @@
     </div>
     <div id="viikko-stats"></div>
     <div id="viikko-aukiolo" title="Laskettu ohjelman näytöksistä - ei asetuksista"></div>
+    <nav id="sali-tabit" class="sali-tabit" hidden></nav>
     <div id="aikataulu-grid"></div>
   </div>
 
@@ -356,12 +357,16 @@
 <div id="context-menu">
   <button id="ctx-muokkaa">✏️ Muokkaa näytöstä</button>
   <button id="ctx-kopioi">📋 Kopioi seuraavaan</button>
+  <div id="ctx-salit"></div>
   <div class="ctx-sep"></div>
   <button id="ctx-poista" style="color:#dc2626">🗑️ Poista näytös</button>
 </div>
 
 <!-- ── Scripts ──────────────────────────────────────────────────────────── -->
-<script src="vendor/xlsx.min.js"></script>
+<!-- The spreadsheet library (425 KB) is only needed to import or export,
+     so it no longer holds up the first paint: deferred, it runs after the page
+     is parsed, before anyone can click Vie Exceliin. -->
+<script src="vendor/xlsx.min.js" defer></script>
 <script src="js/storage.js"></script>
 <script src="js/library.js"></script>
 <script src="js/scheduler.js"></script>
