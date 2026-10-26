@@ -1310,6 +1310,11 @@ const ScheduleUI = (() => {
   // earlier so the first starts where it used to start; moving it left, they
   // move later so the last ends where it used to end. When that can't be
   // done (another room's start in the way), the move goes ahead without it.
+  // Dropped overlapping the space the passed-over shows used to take up, the
+  // moved show snaps right against them (just the cleanup buffer
+  // between), so dragging one show across another is a clean swap: the
+  // passed-over show's tail lands on the moved show's start, or the moved
+  // show takes their old start. Dropped beyond that space, it stays put.
   function dropCandidate(base, wanted, kesto, settings) {
     const where = { sali: base.sali, paiva: base.paiva, wanted, pointedAt: wanted };
     const gapSama = settings.minimivali_sama_sali;
@@ -1329,27 +1334,35 @@ const ScheduleUI = (() => {
       const os = toMin(orig.alkaa), oe = os + orig.kesto;
       const origIdx = room.filter(x => toMin(x.alkaa) < os).length;
       const shifted = new Map();
+      let dir = null, gStart = 0, gEnd = 0;
       if (idx > origIdx) {
         const group = room.slice(origIdx, idx);
         const delta = toMin(group[0].alkaa) - os;
         if (delta > 0) group.forEach(x => shifted.set(x.id, toMin(x.alkaa) - delta));
+        dir = 'right';
+        gEnd = Math.max(...group.map(x => toMin(x.alkaa) + x.kesto));
       } else if (idx < origIdx) {
         const group = room.slice(idx, origIdx);
         const last = group[group.length - 1];
         const delta = floorSnap(oe - (toMin(last.alkaa) + last.kesto), step);
         if (delta > 0) group.forEach(x => shifted.set(x.id, toMin(x.alkaa) + delta));
+        dir = 'left';
+        gStart = toMin(group[0].alkaa);
       }
-      if (shifted.size) fills.push(shifted);
+      if (shifted.size) fills.push({ shifted, dir, gStart, gEnd });
     }
-    fills.push(new Map());
+    fills.push({ shifted: new Map() });
 
-    for (const shifted of fills) {
+    for (const { shifted, dir, gStart, gEnd } of fills) {
       const at = x => shifted.get(x.id) ?? toMin(x.alkaa);
       const prev = room[idx - 1], next = room[idx];
       // Right after the previous show / right before the next one.
       const lo = prev ? ceilSnap(at(prev) + prev.kesto + gapSama, step) : GRID_START;
       const hi = next ? floorSnap(at(next) - gapSama - kesto, step) : maxStart;
-      const start = Math.max(GRID_START, Math.min(maxStart, Math.max(lo, Math.min(wanted, hi))));
+      let start = Math.max(GRID_START, Math.min(maxStart, Math.max(lo, Math.min(wanted, hi))));
+      // The swap magnet (see above)
+      if (dir === 'right' && wanted < gEnd) start = Math.max(GRID_START, Math.min(maxStart, lo));
+      if (dir === 'left' && wanted + kesto > gStart) start = Math.max(GRID_START, Math.min(maxStart, Math.max(lo, hi)));
 
       // Where the block sits clear of its neighbours, it stays exactly there -
       // a spot too close to another room's start is refused (red), as the
