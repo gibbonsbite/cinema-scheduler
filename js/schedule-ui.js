@@ -1176,6 +1176,169 @@ const ScheduleUI = (() => {
     return null;
   }
 
+  // ── Making room ──────────────────────────────────────────────────────────
+  // A show dropped onto a spot that its own room's neighbours crowd keeps that
+  // spot; the neighbours make way instead. Each show in the way moves away
+  // from the dropped one - later if its midpoint is after the dropped show's
+  // midpoint, earlier otherwise - just far enough to leave the room buffer,
+  // and the moves cascade down (or up) the room's day only as far as they
+  // have to: the first neighbour that already clears stops the cascade. A
+  // moved show also steps clear of other rooms' starts (minimivali_eri_sali).
+  //
+  // Returns the moves ([] when nothing is in the way), or null when room
+  // can't be made - a show would have to run past 24:00 or start before
+  // 09:00, or the spot itself sits too close to another room's start, which
+  // moving this room's shows can't fix. The caller then falls back to the
+  // nearest free slot.
+  function makeRoomPlan(base, start, kesto, settings) {
+    const gapSama = settings.minimivali_sama_sali;
+    const gapEri = settings.minimivali_eri_sali ?? 0;
+    const day = (currentSchedule?.naytokset ?? []).filter(x => x.id !== base.id && x.paiva === base.paiva);
+    const otherStarts = day.filter(x => x.sali !== base.sali).map(x => toMin(x.alkaa));
+    const crossClash = s => gapEri > 0 && otherStarts.some(o => Math.abs(o - s) < gapEri);
+    if (crossClash(start)) return null;
+
+    const room = day.filter(x => x.sali === base.sali);
+    const mid = start + kesto / 2;
+    const isAfter = x => toMin(x.alkaa) + x.kesto / 2 >= mid;
+    const moves = [];
+
+    let edge = start + kesto;
+    for (const x of room.filter(isAfter).sort((a, b) => toMin(a.alkaa) - toMin(b.alkaa))) {
+      const from = toMin(x.alkaa);
+      let to = Math.max(from, Math.ceil((edge + gapSama) / 15) * 15);
+      if (to === from) break;
+      while (crossClash(to)) to += 15;
+      if (to + x.kesto > GRID_END) return null;
+      moves.push({ n: x, from, to });
+      edge = to + x.kesto;
+    }
+    edge = start;
+    for (const x of room.filter(y => !isAfter(y)).sort((a, b) => toMin(b.alkaa) - toMin(a.alkaa))) {
+      const from = toMin(x.alkaa);
+      let to = Math.min(from, Math.floor((edge - gapSama - x.kesto) / 15) * 15);
+      if (to === from) break;
+      while (crossClash(to)) to -= 15;
+      if (to < GRID_START) return null;
+      moves.push({ n: x, from, to });
+      edge = to;
+    }
+
+    // Safety net: the day as it would be must pass the same check a drag does.
+    const moved = new Map(moves.map(m => [m.n.id, m.to]));
+    const after = (currentSchedule?.naytokset ?? []).filter(x => x.id !== base.id).map(x => moved.has(x.id)
+      ? { ...x, alkaa: toHHMM(moved.get(x.id)), loppuu: toHHMM(moved.get(x.id) + x.kesto) } : x);
+    const check = [{ ...base, kesto, alkaa: toHHMM(start), loppuu: toHHMM(start + kesto) },
+      ...after.filter(x => moved.has(x.id))];
+    if (check.some(x => Scheduler.validateScreening(x, [...after, check[0]], settings).length)) return null;
+    return moves.sort((a, b) => a.from - b.from);
+  }
+
+  // Where the drop goes and what it does, for both a moved block and a show
+  // dragged in from the list.
+  //
+  // With the cursor over another show in the room, the dragged show slots in
+  // next to it: before it while the cursor is on its first half, after it
+  // once the cursor passes its middle - right up against it with just the
+  // room buffer between (stepping further out if that start would be too
+  // close to another room's), and whatever is crowded on that side makes way.
+  // `wanted` becomes that slot, so the block is drawn and labelled where it
+  // will land.
+  //
+  // With the cursor in a gap, the show goes where the block is pointed: the
+  // spot itself when it's free, the spot with its neighbours moved aside
+  // when room can be made. Failing both, the nearest free slot (red, with
+  // reasons) or nothing at all.
+  function dropCandidate(base, wanted, kesto, settings, pointerMin) {
+    if (pointerMin != null) {
+      const slot = slotNextTo(base, pointerMin, kesto, settings);
+      if (slot != null) {
+        const moves = makeRoomPlan(base, slot, kesto, settings);
+        if (moves) return { sali: base.sali, paiva: base.paiva, wanted: slot, start: slot, valid: true, snapped: false, moves, slotted: true };
+      }
+    }
+    const where = { sali: base.sali, paiva: base.paiva, wanted };
+    const fitted = nearestFreeStart(base, wanted, kesto, settings);
+    if (fitted === wanted) return { ...where, start: wanted, valid: true, snapped: false, moves: [] };
+    const moves = makeRoomPlan(base, wanted, kesto, settings);
+    if (moves) return { ...where, start: wanted, valid: true, snapped: false, moves };
+    const candidate = { ...where, start: fitted ?? wanted, valid: fitted != null, snapped: (fitted ?? wanted) !== wanted, moves: [] };
+    candidate.reasons = refusalReasons(base, wanted, kesto, settings);
+    return candidate;
+  }
+
+  // The start right before or right after the show under the cursor (see
+  // dropCandidate), or null when the cursor isn't over one or the slot would
+  // fall off the grid.
+  function slotNextTo(base, pointerMin, kesto, settings) {
+    const day = (currentSchedule?.naytokset ?? []).filter(x => x.id !== base.id && x.paiva === base.paiva);
+    const under = day.find(x => x.sali === base.sali && toMin(x.alkaa) <= pointerMin && pointerMin < toMin(x.alkaa) + x.kesto);
+    if (!under) return null;
+    const gapSama = settings.minimivali_sama_sali;
+    const gapEri = settings.minimivali_eri_sali ?? 0;
+    const otherStarts = day.filter(x => x.sali !== base.sali).map(x => toMin(x.alkaa));
+    const crossClash = st => gapEri > 0 && otherStarts.some(o => Math.abs(o - st) < gapEri);
+    const uStart = toMin(under.alkaa), uEnd = uStart + under.kesto;
+    const before = pointerMin < uStart + under.kesto / 2;
+    let slot = before
+      ? Math.floor((uStart - gapSama - kesto) / 15) * 15
+      : Math.ceil((uEnd + gapSama) / 15) * 15;
+    const step = before ? -15 : 15;
+    for (let guard = 0; guard < 12 && crossClash(slot); guard++) slot += step;
+    if (slot < GRID_START || slot > latestStart(kesto)) return null;
+    return slot;
+  }
+
+  // Live preview of a plan: the neighbours that would make way are drawn at
+  // their new times while the cursor is there, and slide back when it moves
+  // on. Only the DOM moves - renderGrid() rebuilds everything on drop.
+  const previewed = new Map(); // show id -> its kesto and original start
+  function previewMoves(moves, horizontal) {
+    const headerOffset = horizontal ? DAY_HEADER_W : DAY_HEADER_H;
+    const grid = document.getElementById('aikataulu-grid');
+    const place = (id, startMin, kesto) => {
+      const block = grid.querySelector(`.naytokset-block[data-id="${id}"]:not(.live-dragging)`);
+      const buf = grid.querySelector(`.buffer-zone[data-id="${id}"]`);
+      const off = headerOffset + (startMin - GRID_START) * PX_PER_MIN;
+      const prop = horizontal ? 'left' : 'top';
+      if (block) {
+        block.style[prop] = off + 'px';
+        const time = block.querySelector('.block-time');
+        if (time) time.textContent = dot(startMin);
+      }
+      if (buf && !buf.style.position) buf.style[prop] = (off + kesto * PX_PER_MIN) + 'px';
+      return block;
+    };
+    const next = new Map((moves ?? []).map(m => [m.n.id, m]));
+    previewed.forEach((p, id) => {
+      if (next.has(id)) return;
+      place(id, p.from, p.kesto)?.classList.remove('making-room');
+      previewed.delete(id);
+    });
+    next.forEach((m, id) => {
+      if (!previewed.has(id)) previewed.set(id, { from: m.from, kesto: m.n.kesto });
+      place(id, m.to, m.n.kesto)?.classList.add('making-room');
+    });
+  }
+
+  // "RESIDENT EVIL 16.15 → 16.30" per moved show
+  const moveLines = moves => moves.map(m => `${m.n.nimi} ${dot(m.from)} → ${dot(m.to)}`);
+
+  // Applies a plan's moves to the schedule (opening hours stretch to fit, as
+  // for a drag) and says what moved.
+  function applyMoves(candidate, verb) {
+    if (!candidate.moves?.length) return;
+    candidate.moves.forEach(m => {
+      const n = currentSchedule.naytokset.find(x => x.id === m.n.id);
+      if (!n) return;
+      n.alkaa = toHHMM(m.to);
+      n.loppuu = toHHMM(m.to + n.kesto);
+      extendOpeningHours(n.paiva, m.to, m.to + n.kesto);
+    });
+    showWarning(`Näytös ${verb} kohtaan ${dot(candidate.start)}. Samasta salista siirrettiin tilaa tehden:\n` +
+      moveLines(candidate.moves).join('\n'), 'ℹ️');
+  }
+
   // ── Saying why a spot was refused ────────────────────────────────────────
   // Every show in the way of `wanted`, as the clauses validateScreening writes.
   function refusalReasons(base, wanted, kesto, settings) {
@@ -1244,18 +1407,17 @@ const ScheduleUI = (() => {
 
       // The block tracks the cursor, so the drag stays direct - it is drawn
       // where you are pointing, not where it would end up. `start` is where the
-      // drop will actually put it: `wanted` when that fits, otherwise the
-      // nearest slot that does. The two differing is what turns the block red.
-      const base = { id, sali: newSali, paiva: newPaiva };
-      const fitted = nearestFreeStart(base, wanted, kesto, settings);
-      const start = fitted ?? wanted;
-      candidate = { sali: newSali, paiva: newPaiva, start, wanted, valid: fitted != null, snapped: start !== wanted };
-      if (blockedAt(candidate)) candidate.reasons = refusalReasons(base, wanted, kesto, settings);
+      // drop will actually put it: `wanted` when that fits or room can be made
+      // around it, otherwise the nearest slot that does - the two differing
+      // is what turns the block red.
+      const pointerPos = horizontal ? e.clientX - dayColRect.left : e.clientY - dayColRect.top;
+      const pointerMin = GRID_START + (pointerPos - headerOffset) / PX_PER_MIN;
+      candidate = dropCandidate({ id, sali: newSali, paiva: newPaiva }, wanted, kesto, settings, pointerMin);
 
       // Snap into the target cell along the cross axis. Buffer offset is based
       // on the real kesto (matching renderGrid's static buffer-zone math), not
       // the visually-clamped minimum block size below.
-      const alongOffset = headerOffset + (wanted - GRID_START) * PX_PER_MIN;
+      const alongOffset = headerOffset + (candidate.wanted - GRID_START) * PX_PER_MIN;
       const bufAlongOffset = alongOffset + kesto * PX_PER_MIN;
       if (horizontal) {
         setFixedBox(block, dayColRect.left + alongOffset, dayColRect.top + 2, Math.max(kesto * PX_PER_MIN, 40), dayColRect.height - 4);
@@ -1271,6 +1433,7 @@ const ScheduleUI = (() => {
     }
 
     dragState.lastCandidate = candidate;
+    previewMoves(candidate?.moves, horizontal);
     // Red means "not here": either the spot under the cursor is taken (the drop
     // will slide it to `start`) or the whole room-day is full (the drop reverts).
     block.classList.toggle('drag-invalid', !!candidate && blockedAt(candidate));
@@ -1293,17 +1456,22 @@ const ScheduleUI = (() => {
   let dragReasonEl = null;
 
   function showDragReason(anchorEl, horizontal, candidate) {
-    if (!candidate || !blockedAt(candidate)) { hideDragReason(); return; }
+    const makingRoom = !!candidate?.moves?.length;
+    if (!candidate || (!blockedAt(candidate) && !makingRoom)) { hideDragReason(); return; }
     const reasons = (candidate.reasons ?? []).map(r => r[0].toUpperCase() + r.slice(1));
 
     if (!dragReasonEl) {
       dragReasonEl = document.createElement('div');
-      dragReasonEl.className = 'drag-reason';
       document.body.appendChild(dragReasonEl);
     }
+    dragReasonEl.className = 'drag-reason' + (makingRoom ? ' making-room' : '');
     const line = (cls, text) => { const d = document.createElement('div'); d.className = cls; d.textContent = text; return d; };
     const shown = reasons.slice(0, 3);
-    dragReasonEl.replaceChildren(
+    if (makingRoom) dragReasonEl.replaceChildren(
+      line('drag-reason-title', `Tehdään tilaa kohtaan ${dot(candidate.start)}`),
+      ...moveLines(candidate.moves).map(t => line('drag-reason-item', t)),
+    );
+    else dragReasonEl.replaceChildren(
       line('drag-reason-title', `Ei mahdu kohtaan ${dot(candidate.wanted)}`),
       ...shown.map(r => line('drag-reason-item', r)),
       ...(reasons.length > shown.length ? [line('drag-reason-item', `+ ${reasons.length - shown.length} muuta näytöstä`)] : []),
@@ -1355,6 +1523,7 @@ const ScheduleUI = (() => {
           alkaa: toHHMM(lastCandidate.start),
           loppuu: toHHMM(lastCandidate.start + n.kesto),
         };
+        applyMoves(lastCandidate, 'siirrettiin');
         Storage.saveSchedule(currentSchedule);
         extendOpeningHours(lastCandidate.paiva, lastCandidate.start, lastCandidate.start + n.kesto);
         if (lastCandidate.snapped) snappedNotice(lastCandidate);
@@ -1364,6 +1533,7 @@ const ScheduleUI = (() => {
     }
 
     dragState = null;
+    previewed.clear();
     renderGrid();
   }
 
@@ -1416,14 +1586,13 @@ const ScheduleUI = (() => {
     const wanted = Math.max(GRID_START, Math.min(snappedStart, latestStart(movie.kesto)));
 
     const base = { id: '__preview__', sali: dayCol.dataset.sali, paiva: dayCol.dataset.paiva };
-    const fitted = nearestFreeStart(base, wanted, movie.kesto, settings);
-    const start = fitted ?? wanted;
-    const candidate = { sali: base.sali, paiva: base.paiva, start, wanted, valid: fitted != null, snapped: start !== wanted, movieId: movie.id };
-    if (blockedAt(candidate)) candidate.reasons = refusalReasons(base, wanted, movie.kesto, settings);
+    const pointerMin = GRID_START + (relPos - headerOffset) / PX_PER_MIN;
+    const candidate = { ...dropCandidate(base, wanted, movie.kesto, settings, pointerMin), movieId: movie.id };
+    previewMoves(candidate.moves, horizontal);
 
     // Ghost sits under the cursor and reddens where the show cannot go, exactly
     // like a block being moved, and its label reads the cursor's time too.
-    showGridDropPreview(dayCol, horizontal, headerOffset, wanted, movie.kesto, blockedAt(candidate));
+    showGridDropPreview(dayCol, horizontal, headerOffset, candidate.wanted, movie.kesto, blockedAt(candidate));
     showDragReason(gridGhostEl, horizontal, candidate);
     gridDropCandidate = candidate;
   }
@@ -1447,6 +1616,7 @@ const ScheduleUI = (() => {
     if (gridGhostEl && gridGhostEl.parentElement) gridGhostEl.parentElement.removeChild(gridGhostEl);
     gridDropCandidate = null;
     hideDragReason();
+    previewMoves([], Storage.getSettings().aikataulu_suunta === 'vaaka');
   }
 
   function onGridDrop(e) {
@@ -1481,6 +1651,7 @@ const ScheduleUI = (() => {
       lastenelokuva: !!movie.lastenelokuva,
     };
     currentSchedule.naytokset.push(naytos);
+    applyMoves(candidate, 'lisättiin');
     extendOpeningHours(candidate.paiva, candidate.start, candidate.start + movie.kesto);
 
     // Pin the show-count field to the movie's new real total so it visibly
@@ -1748,9 +1919,9 @@ const ScheduleUI = (() => {
   // and a new message restarts the clock rather than inheriting the old
   // message's, which used to hide a second warning early.
   let warningTimer = null;
-  function showWarning(msg) {
+  function showWarning(msg, icon = '⚠️') {
     const bar = document.getElementById('warning-bar');
-    bar.textContent = '⚠️ ' + msg;
+    bar.textContent = icon + ' ' + msg;
     bar.classList.add('visible');
     clearTimeout(warningTimer);
     warningTimer = setTimeout(() => bar.classList.remove('visible'), Math.min(15000, Math.max(5000, msg.length * 75)));

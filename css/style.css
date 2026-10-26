@@ -593,6 +593,12 @@ select option {
 .drag-reason-title { font-weight: 700; color: #ff9d92; }
 .drag-reason-item { padding-left: 10px; text-indent: -10px; }
 .drag-reason-item::before { content: "• "; }
+.drag-reason.making-room .drag-reason-title { color: #9fd3ff; }
+/* Neighbours that will make way for a drop slide to their new place while the
+   cursor is there - see previewMoves() in schedule-ui.js. */
+#aikataulu-grid .naytokset-block:not(.live-dragging),
+#aikataulu-grid .buffer-zone { transition: left 0.12s ease, top 0.12s ease; }
+.naytokset-block.making-room { outline: 2px dashed rgba(37, 99, 235, 0.85); outline-offset: 1px; }
 .drag-reason-outcome { margin-top: 4px; padding-top: 4px; border-top: 1px solid rgba(255,255,255,0.18); color: #c9d1e6; }
 
 /* Live drag feedback - see onPointerMove in schedule-ui.js */
