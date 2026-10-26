@@ -1128,6 +1128,8 @@ const ScheduleUI = (() => {
       settings,
       grabOffsetX: e.clientX - rect.left,
       grabOffsetY: e.clientY - rect.top,
+      ghostW: rect.width,
+      ghostH: rect.height,
       block,
       buf,
       lastCandidate: null,
@@ -1254,10 +1256,10 @@ const ScheduleUI = (() => {
       const slot = slotNextTo(base, pointerMin, kesto, settings);
       if (slot != null) {
         const moves = makeRoomPlan(base, slot, kesto, settings);
-        if (moves) return { sali: base.sali, paiva: base.paiva, wanted: slot, start: slot, valid: true, snapped: false, moves, slotted: true };
+        if (moves) return { sali: base.sali, paiva: base.paiva, wanted: slot, pointedAt: wanted, start: slot, valid: true, snapped: false, moves, slotted: true };
       }
     }
-    const where = { sali: base.sali, paiva: base.paiva, wanted };
+    const where = { sali: base.sali, paiva: base.paiva, wanted, pointedAt: wanted };
     const fitted = nearestFreeStart(base, wanted, kesto, settings);
     if (fitted === wanted) return { ...where, start: wanted, valid: true, snapped: false, moves: [] };
     const moves = makeRoomPlan(base, wanted, kesto, settings);
@@ -1381,16 +1383,25 @@ const ScheduleUI = (() => {
 
   function onPointerMove(e) {
     if (!dragState) return;
-    const { horizontal, block, buf, grabOffsetX, grabOffsetY, kesto, settings, id } = dragState;
+    const { horizontal, block, buf, grabOffsetX, grabOffsetY, ghostW, ghostH, kesto, settings, id } = dragState;
     const bufferMin = settings.minimivali_sama_sali;
 
+    // The dragged block is a ghost that follows the cursor exactly, wherever
+    // the show will actually land - that spot gets its own placeholder in the
+    // grid (showLandingMarker). Its buffer zone rides along behind it.
     const floatLeft = e.clientX - grabOffsetX;
     const floatTop = e.clientY - grabOffsetY;
+    setFixedBox(block, floatLeft, floatTop, ghostW, ghostH);
+    if (buf) {
+      if (horizontal) setFixedBox(buf, floatLeft + kesto * PX_PER_MIN, floatTop, bufferMin * PX_PER_MIN, ghostH);
+      else setFixedBox(buf, floatLeft, floatTop + kesto * PX_PER_MIN, ghostW, bufferMin * PX_PER_MIN);
+    }
 
-    // pointer-events:none on both (set at drag start) keeps elementFromPoint
-    // from hitting the dragged elements themselves.
-    const under = document.elementFromPoint(floatLeft + 3, floatTop + 3);
-    const dayCol = under && under.closest('.day-col');
+    // The cell is the one under the cursor; the time is read from the ghost's
+    // leading edge, which is where its start is drawn. pointer-events:none on
+    // the ghost (set at drag start) keeps elementFromPoint from hitting it.
+    const under = document.elementFromPoint(e.clientX, e.clientY);
+    const dayCol = under && under.closest('#aikataulu-grid .day-col');
 
     let candidate = null;
     if (dayCol) {
@@ -1398,51 +1409,59 @@ const ScheduleUI = (() => {
       const dayColRect = dayCol.getBoundingClientRect();
       const relPos = horizontal ? floatLeft - dayColRect.left : floatTop - dayColRect.top;
       const snappedStart = round15(GRID_START + (relPos - headerOffset) / PX_PER_MIN);
-
-      const newSali = dayCol.dataset.sali;
-      const newPaiva = dayCol.dataset.paiva;
       // Not clamped to the day's configured opening hours - dragging past them
       // is allowed, and extends that day's hours on drop (see onPointerUp).
       const wanted = Math.max(GRID_START, Math.min(snappedStart, latestStart(kesto)));
 
-      // The block tracks the cursor, so the drag stays direct - it is drawn
-      // where you are pointing, not where it would end up. `start` is where the
-      // drop will actually put it: `wanted` when that fits or room can be made
-      // around it, otherwise the nearest slot that does - the two differing
-      // is what turns the block red.
+      // `start` is where the drop will actually put it: `wanted` when that fits
+      // or room can be made around it, the slot next to the show under the
+      // cursor, or else the nearest slot that fits - that last case is what
+      // turns the ghost red.
       const pointerPos = horizontal ? e.clientX - dayColRect.left : e.clientY - dayColRect.top;
       const pointerMin = GRID_START + (pointerPos - headerOffset) / PX_PER_MIN;
-      candidate = dropCandidate({ id, sali: newSali, paiva: newPaiva }, wanted, kesto, settings, pointerMin);
-
-      // Snap into the target cell along the cross axis. Buffer offset is based
-      // on the real kesto (matching renderGrid's static buffer-zone math), not
-      // the visually-clamped minimum block size below.
-      const alongOffset = headerOffset + (candidate.wanted - GRID_START) * PX_PER_MIN;
-      const bufAlongOffset = alongOffset + kesto * PX_PER_MIN;
-      if (horizontal) {
-        setFixedBox(block, dayColRect.left + alongOffset, dayColRect.top + 2, Math.max(kesto * PX_PER_MIN, 40), dayColRect.height - 4);
-        if (buf) setFixedBox(buf, dayColRect.left + bufAlongOffset, dayColRect.top + 2, bufferMin * PX_PER_MIN, dayColRect.height - 4);
-      } else {
-        setFixedBox(block, dayColRect.left + 2, dayColRect.top + alongOffset, dayColRect.width - 4, Math.max(kesto * PX_PER_MIN, 20));
-        if (buf) setFixedBox(buf, dayColRect.left + 2, dayColRect.top + bufAlongOffset, dayColRect.width - 4, bufferMin * PX_PER_MIN);
-      }
-      if (buf) buf.style.visibility = '';
+      candidate = dropCandidate({ id, sali: dayCol.dataset.sali, paiva: dayCol.dataset.paiva }, wanted, kesto, settings, pointerMin);
+      if (candidate.valid) showLandingMarker(dayCol, horizontal, candidate.start, kesto);
+      else hideLandingMarker();
     } else {
-      setFixedBox(block, floatLeft, floatTop, block.offsetWidth, block.offsetHeight);
-      if (buf) buf.style.visibility = 'hidden';
+      hideLandingMarker();
     }
 
     dragState.lastCandidate = candidate;
     previewMoves(candidate?.moves, horizontal);
-    // Red means "not here": either the spot under the cursor is taken (the drop
-    // will slide it to `start`) or the whole room-day is full (the drop reverts).
+    // Red means "not here": the spot under the cursor is taken and nothing can
+    // make way (the drop slides to the marker, or reverts if there is none).
     block.classList.toggle('drag-invalid', !!candidate && blockedAt(candidate));
-    // The time shown is the spot under the cursor, red or not, so it always
-    // matches where the block is drawn. Why a spot is red, and where the drop
-    // would land instead, is spelled out next to the block (showDragReason).
+    // The ghost reads the time it is pointing at; the landing marker reads the
+    // time the drop will give the show.
     const timeSpan = block.querySelector('.block-time');
-    if (timeSpan && candidate) timeSpan.textContent = toHHMM(candidate.wanted).replace(':', '.');
+    if (timeSpan && candidate) timeSpan.textContent = dot(candidate.pointedAt);
     showDragReason(block, horizontal, candidate);
+  }
+
+  // ── Where the drop will land ─────────────────────────────────────────────
+  // A dashed placeholder in the target cell at the start the drop will give
+  // the show, labelled with that time - so the free-moving ghost never has to
+  // double as the answer to "where will it go". Shared by block drags and
+  // list drags; it slides within a cell (CSS transition) as the slot changes.
+  let landingEl = null;
+  function showLandingMarker(dayCol, horizontal, startMin, kesto) {
+    if (!landingEl) {
+      landingEl = document.createElement('div');
+      landingEl.className = 'landing-marker';
+      landingEl.innerHTML = '<span class="block-time"></span>';
+    }
+    if (landingEl.parentElement !== dayCol) {
+      landingEl.style.transition = 'none'; // no slide in from another cell
+      dayCol.appendChild(landingEl);
+    }
+    const headerOffset = horizontal ? DAY_HEADER_W : DAY_HEADER_H;
+    positionBox(landingEl, horizontal, headerOffset + (startMin - GRID_START) * PX_PER_MIN,
+      Math.max(kesto * PX_PER_MIN, horizontal ? 40 : 20) + 'px', '2px', '2px');
+    landingEl.querySelector('.block-time').textContent = dot(startMin);
+    if (landingEl.style.transition) { void landingEl.offsetWidth; landingEl.style.transition = ''; }
+  }
+  function hideLandingMarker() {
+    if (landingEl) { landingEl.remove(); landingEl = null; }
   }
 
   // ── Why a dragged show is red ─────────────────────────────────────────────
@@ -1505,6 +1524,7 @@ const ScheduleUI = (() => {
     document.removeEventListener('mousemove', onPointerMove);
     document.removeEventListener('mouseup', onPointerUp);
     hideDragReason();
+    hideLandingMarker();
 
     const { id, lastCandidate } = dragState;
     // No cleanup needed for block/buf - renderGrid() below wipes and rebuilds
@@ -1592,7 +1612,9 @@ const ScheduleUI = (() => {
 
     // Ghost sits under the cursor and reddens where the show cannot go, exactly
     // like a block being moved, and its label reads the cursor's time too.
-    showGridDropPreview(dayCol, horizontal, headerOffset, candidate.wanted, movie.kesto, blockedAt(candidate));
+    showGridDropPreview(dayCol, horizontal, headerOffset, candidate.pointedAt, movie.kesto, blockedAt(candidate));
+    if (candidate.valid && candidate.start !== candidate.pointedAt) showLandingMarker(dayCol, horizontal, candidate.start, movie.kesto);
+    else hideLandingMarker();
     showDragReason(gridGhostEl, horizontal, candidate);
     gridDropCandidate = candidate;
   }
@@ -1616,6 +1638,7 @@ const ScheduleUI = (() => {
     if (gridGhostEl && gridGhostEl.parentElement) gridGhostEl.parentElement.removeChild(gridGhostEl);
     gridDropCandidate = null;
     hideDragReason();
+    hideLandingMarker();
     previewMoves([], Storage.getSettings().aikataulu_suunta === 'vaaka');
   }
 

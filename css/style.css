@@ -596,8 +596,30 @@ select option {
 .drag-reason.making-room .drag-reason-title { color: #9fd3ff; }
 /* Neighbours that will make way for a drop slide to their new place while the
    cursor is there - see previewMoves() in schedule-ui.js. */
-#aikataulu-grid .naytokset-block:not(.live-dragging),
-#aikataulu-grid .buffer-zone { transition: left 0.12s ease, top 0.12s ease; }
+/* Slow enough to follow with the eye which show goes where. */
+#aikataulu-grid .naytokset-block:not(.live-dragging):not(.grid-drop-ghost),
+#aikataulu-grid .buffer-zone:not([style*="fixed"]) { transition: left 0.35s ease, top 0.35s ease; }
+
+/* Where a dragged show will land - see showLandingMarker() in schedule-ui.js.
+   The dragged block itself floats with the cursor. */
+.landing-marker {
+  position: absolute;
+  z-index: 3;
+  border: 2px dashed #2563eb;
+  border-radius: 4px;
+  background: rgba(37, 99, 235, 0.12);
+  pointer-events: none;
+  transition: left 0.2s ease, top 0.2s ease;
+}
+.landing-marker .block-time {
+  display: block;
+  padding: 2px 4px;
+  font-size: 0.72em;
+  font-weight: 700;
+  color: #1d4ed8;
+}
+:root[data-theme="dark"] .landing-marker { border-color: #7fb2ff; background: rgba(127, 178, 255, 0.14); }
+:root[data-theme="dark"] .landing-marker .block-time { color: #a9cbff; }
 .naytokset-block.making-room { outline: 2px dashed rgba(37, 99, 235, 0.85); outline-offset: 1px; }
 .drag-reason-outcome { margin-top: 4px; padding-top: 4px; border-top: 1px solid rgba(255,255,255,0.18); color: #c9d1e6; }
 
@@ -606,7 +628,7 @@ select option {
   z-index: 5;
   cursor: grabbing;
   box-shadow: 0 4px 10px rgba(0,0,0,0.35);
-  opacity: 0.95;
+  opacity: 0.8;
 }
 /* The show cannot occupy the spot under the cursor. The drop still lands it on
    the nearest slot that fits (or reverts, if the room-day is full) - the block
