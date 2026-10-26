@@ -111,12 +111,18 @@ const Scheduler = (() => {
   // movies: Map of movie id -> library movie, for the week's movies.
   // plan: { 'STUDIO 1': [{ id, paivat: ['PE', ...] }, ...], ... } - each
   // theater's movies, highest priority first.
-  // Returns { naytokset, warnings }: warnings name any room-day whose shows
-  // could not all fit between the day's earliest start and midnight - they
-  // are still placed (nothing the user planned is dropped), running late.
+  // Midnight is a hard limit: no show is placed to end after 24:00. A room
+  // whose evening would run past it moves earlier; a room-day whose shows
+  // can't fit between its earliest start and midnight at all keeps its
+  // highest-priority shows and leaves out the lowest-priority ones, which
+  // are listed in `dropped` so the caller can ask before filling.
+  //
+  // Returns { naytokset, warnings, dropped: [{ paiva, sali, nimi }] }.
+  const DAY_END = 24 * 60;
   function populate(movies, plan, settings, viikkoAlku, viikkoLoppu) {
     const naytokset = [];
     const warnings = [];
+    const dropped = [];
     const paivat = getPaivat(viikkoAlku, viikkoLoppu);
     const gapSama = settings.minimivali_sama_sali;
     const gapEri = Math.max(settings.minimivali_eri_sali ?? 0, MIN_ERI_SALI);
@@ -157,41 +163,65 @@ const Scheduler = (() => {
         // anchor; each earlier show ends one cleanup buffer (floored to the
         // :15 grid) before the next starts. A kids-only chain can't hold the
         // evening slot - it ends where the kids' end-time rule allows.
-        let anchor = anchorMin - staggerIdx * ANCHOR_STAGGER
-          + EXTRA_SHOW_LATER * Math.max(0, chain.length - typicalRoomShows);
+        const packChain = () => {
+          let anchor = anchorMin - staggerIdx * ANCHOR_STAGGER
+            + EXTRA_SHOW_LATER * Math.max(0, chain.length - typicalRoomShows);
+          const lastShow = chain[chain.length - 1];
+          if (lastShow.movie.lastenelokuva) anchor = Math.min(anchor, floor15(kidsLatestEnd - lastShow.movie.kesto));
+          const st = new Array(chain.length);
+          for (let i = chain.length - 1; i >= 0; i--) {
+            const x = chain[i];
+            let start = i === chain.length - 1 ? anchor : floor15(st[i + 1] - gapSama - x.movie.kesto);
+            if (x.movie.lastenelokuva) start = Math.min(start, floor15(kidsLatestEnd - x.movie.kesto));
+            st[i] = start;
+          }
+          // An evening that would run past midnight moves earlier as a whole.
+          const end = st[st.length - 1] + lastShow.movie.kesto;
+          if (end > DAY_END) {
+            const shift = round15(end - DAY_END);
+            for (let i = 0; i < st.length; i++) st[i] -= shift;
+          }
+          // A chain that now starts before the day's earliest allowed start
+          // begins there instead and runs on from it.
+          if (st[0] < floorMin) {
+            const shift = round15(floorMin - st[0]);
+            for (let i = 0; i < st.length; i++) st[i] += shift;
+            for (let i = 1; i < st.length; i++) {
+              const minStart = round15(st[i - 1] + chain[i - 1].movie.kesto + gapSama);
+              if (st[i] < minStart) st[i] = minStart;
+            }
+          }
+          // Tight packing: if the kids' end-time clamp opened a gap beyond the
+          // buffer plus rounding, pull everything after it earlier - a room
+          // never sits idle longer than cleanup + rounding.
+          for (let i = 1; i < chain.length; i++) {
+            const gap = st[i] - (st[i - 1] + chain[i - 1].movie.kesto);
+            if (gap <= gapSama + 14) continue;
+            let pull = floor15(gap - gapSama);
+            for (let j = i; j < chain.length; j++) {
+              if (chain[j].movie.lastenelokuva) pull = Math.min(pull, st[j] - round15(kidsEarliest));
+            }
+            if (pull <= 0) continue;
+            for (let j = i; j < chain.length; j++) st[j] -= pull;
+          }
+          return st;
+        };
+        const endOf = st => st[st.length - 1] + chain[chain.length - 1].movie.kesto;
+
+        // Too many shows for the day: leave out the lowest-priority one (the
+        // lowest in its theater's list) until the rest fit before midnight.
+        let starts = packChain();
+        while (chain.length > 1 && (endOf(starts) > DAY_END || starts[0] < floorMin)) {
+          let worst = 0;
+          chain.forEach((x, i) => { if (x.rankIndex >= chain[worst].rankIndex) worst = i; });
+          dropped.push({ paiva, sali, nimi: chain[worst].movie.nimi });
+          chain.splice(worst, 1);
+          starts = packChain();
+        }
         const last = chain[chain.length - 1];
-        if (last.movie.lastenelokuva) anchor = Math.min(anchor, floor15(kidsLatestEnd - last.movie.kesto));
-        const starts = new Array(chain.length);
-        for (let i = chain.length - 1; i >= 0; i--) {
-          const x = chain[i];
-          let start = i === chain.length - 1 ? anchor : floor15(starts[i + 1] - gapSama - x.movie.kesto);
-          if (x.movie.lastenelokuva) start = Math.min(start, floor15(kidsLatestEnd - x.movie.kesto));
-          starts[i] = start;
-        }
-
-        // A chain too long for its day starts at the safety floor instead and
-        // runs on from there - every planned show stays.
-        if (starts[0] < floorMin) {
-          const shift = round15(floorMin - starts[0]);
-          for (let i = 0; i < starts.length; i++) starts[i] += shift;
-          for (let i = 1; i < starts.length; i++) {
-            const minStart = round15(starts[i - 1] + chain[i - 1].movie.kesto + gapSama);
-            if (starts[i] < minStart) starts[i] = minStart;
-          }
-        }
-
-        // Tight packing: if the kids' end-time clamp opened a gap beyond the
-        // buffer plus rounding, pull everything after it earlier - a room
-        // never sits idle longer than cleanup + rounding.
-        for (let i = 1; i < chain.length; i++) {
-          const gap = starts[i] - (starts[i - 1] + chain[i - 1].movie.kesto);
-          if (gap <= gapSama + 14) continue;
-          let pull = floor15(gap - gapSama);
-          for (let j = i; j < chain.length; j++) {
-            if (chain[j].movie.lastenelokuva) pull = Math.min(pull, starts[j] - round15(kidsEarliest));
-          }
-          if (pull <= 0) continue;
-          for (let j = i; j < chain.length; j++) starts[j] -= pull;
+        if (endOf(starts) > DAY_END) { // a single show longer than the whole day
+          dropped.push({ paiva, sali, nimi: last.movie.nimi });
+          return;
         }
 
         // Cross-theater spacing: walking the chain from the evening backwards,
@@ -208,7 +238,7 @@ const Scheduler = (() => {
             for (let guard = 0; guard < 8 && collides(starts[i]) && starts[0] - 15 >= floorMin; guard++) {
               for (let j = 0; j <= i; j++) starts[j] -= 15;
             }
-            for (let guard = 0; guard < 8 && collides(starts[i]); guard++) {
+            for (let guard = 0; guard < 8 && collides(starts[i]) && endOf(starts) + 15 <= DAY_END; guard++) {
               for (let j = i; j < chain.length; j++) starts[j] += 15;
             }
           }
@@ -217,8 +247,6 @@ const Scheduler = (() => {
         const crowded = chain.filter((x, i) => collides(starts[i]));
         if (crowded.length) warnings.push(`${paiva} ${sali}: ${crowded.map(x => x.movie.nimi).join(', ')} alkaa alle ${gapEri} min päässä toisen salin näytöksestä - päivä on liian täynnä.`);
 
-        const lastEnd = starts[starts.length - 1] + last.movie.kesto;
-        if (lastEnd > 24 * 60) warnings.push(`${paiva} ${sali}: ${chain.length} näytöstä ei mahdu ennen puoltayötä (viimeinen päättyy ${toHHMM(lastEnd % (24 * 60))}).`);
 
         chain.forEach((x, i) => {
           placedToday.push(starts[i]);
@@ -240,7 +268,7 @@ const Scheduler = (() => {
       });
     });
 
-    return { naytokset, warnings };
+    return { naytokset, warnings, dropped };
   }
 
   // Validate a single screening against constraints (used while/after dragging

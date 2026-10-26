@@ -53,6 +53,7 @@ const SettingsUI = (() => {
     // Gap inputs
     document.getElementById('gap-sama').value = settings.minimivali_sama_sali;
     document.getElementById('gap-eri').value = settings.minimivali_eri_sali;
+    document.getElementById('raahaus-tarkkuus').value = String(settings.raahaus_tarkkuus ?? 5);
 
     // Excel opening times
     document.getElementById('aukiolo-ennen').value = settings.aukiolo_excel?.avautuu_ennen_min ?? 30;
@@ -111,6 +112,8 @@ const SettingsUI = (() => {
     const eri  = parseInt(document.getElementById('gap-eri').value, 10);
     if (!isNaN(sama) && sama >= 0) settings.minimivali_sama_sali = sama;
     if (!isNaN(eri)  && eri  >= 0) settings.minimivali_eri_sali  = eri;
+    const tarkkuus = parseInt(document.getElementById('raahaus-tarkkuus').value, 10);
+    if ([1, 5, 10, 15, 30].includes(tarkkuus)) settings.raahaus_tarkkuus = tarkkuus;
 
     // Lastenelokuva time window
     const lastenAik = document.getElementById('lasten-aikaisintaan').value;

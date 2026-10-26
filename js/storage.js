@@ -38,6 +38,9 @@ const Storage = (() => {
       // scheduler, so an extra cross-room constraint is unnecessary by
       // default.
       minimivali_eri_sali: 0,
+      // The step every manual edit snaps to (dragging, making room, gap
+      // fills, moving between theaters), in minutes: 1, 5, 10, 15 or 30.
+      raahaus_tarkkuus: 5,
       // 'pysty' = time flows downward, theaters side by side (columns).
       // 'vaaka' = time flows sideways, theaters stacked (rows).
       aikataulu_suunta: 'vaaka',
@@ -199,6 +202,7 @@ const Storage = (() => {
       });
       if (saved.minimivali_sama_sali != null) merged.minimivali_sama_sali = saved.minimivali_sama_sali;
       if (saved.minimivali_eri_sali != null) merged.minimivali_eri_sali = saved.minimivali_eri_sali;
+      if ([1, 5, 10, 15, 30].includes(Number(saved.raahaus_tarkkuus))) merged.raahaus_tarkkuus = Number(saved.raahaus_tarkkuus);
       if (saved.aikataulu_suunta) merged.aikataulu_suunta = saved.aikataulu_suunta;
       if (saved.lastenelokuva) {
         merged.lastenelokuva = Object.assign(merged.lastenelokuva, saved.lastenelokuva);

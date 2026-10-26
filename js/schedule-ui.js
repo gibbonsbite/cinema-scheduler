@@ -15,6 +15,9 @@ const ScheduleUI = (() => {
 
   let currentSchedule = null;
   let dragState = null;
+  let selectedIds = new Set(); // shows picked with a selection box or Ctrl/⌘-click
+  let marquee = null;          // the selection box being drawn
+  let groupDrag = null;        // several selected shows being moved together
   let contextTarget = null;
   let draggingMovieId = null;
   let rowDragSettings = null; // settings for the current list drag (see onRowDragStart) // movie being dragged from the list, if any (see grid drop target below)
@@ -90,7 +93,13 @@ const ScheduleUI = (() => {
     return `${String(Math.floor(min/60)).padStart(2,'0')}:${String(min%60).padStart(2,'0')}`;
   }
 
-  function round15(min) { return Math.round(min / 15) * 15; }
+  // Manual edits snap to the "Raahauksen tarkkuus" setting (raahaus_tarkkuus,
+  // default 5 min) - dragging, making room, filling gaps, moving between
+  // theaters. "Täytä ohjelma" keeps quarter hours (Scheduler.populate).
+  const snapOf = settings => settings?.raahaus_tarkkuus ?? 5;
+  const roundSnap = (min, step) => Math.round(min / step) * step;
+  const ceilSnap = (min, step) => Math.ceil(min / step) * step;
+  const floorSnap = (min, step) => Math.floor(min / step) * step;
 
   const sameOrder = (a, b) => a.length === b.length && a.every((v, i) => v === b[i]);
 
@@ -527,7 +536,8 @@ const ScheduleUI = (() => {
           ${ikarajaBadge(m.ikäraja)}
         </div>
         <div class="elokuva-rivi-controls">
-          ${salit.length ? salit.map(sali => `<span class="sali-merkki">${sali.replace('STUDIO ', 'Studio ')}</span>`).join('')
+          <span class="sali-otsikko">Sali:</span>
+          ${salit.length ? salit.map(saliBadge).join('')
                          : '<span class="sali-merkki ei-salia" title="Lisää elokuva saliin Suunnittelu-sivulla">ei salia</span>'}
           <button type="button" class="btn-icon btn-danger btn-poista-viikosta" data-id="${m.id}"
                   title="Poista elokuva tältä viikolta">🗑️</button>
@@ -742,6 +752,7 @@ const ScheduleUI = (() => {
     el.innerHTML = `
       <span class="stat-total"><strong>${naytokset.length}</strong> ${naytokset.length === 1 ? 'näytös' : 'näytöstä'}</span>
       <span class="stat-elokuvat">${rosterMovies().length} elokuvaa</span>
+      ${selectedIds.size ? `<span class="stat-valinta">${selectedIds.size} valittu · Esc poistaa valinnan</span>` : ''}
       ${perSali}`;
 
     // Nothing on the grid, nothing to clear - same signal the tally already gives.
@@ -803,7 +814,7 @@ const ScheduleUI = (() => {
     el.innerHTML = [...SALAT, 'KAIKKI'].map(v => {
       const label = v === 'KAIKKI' ? 'Kaikki salit' : v.replace('STUDIO ', 'Studio ');
       const n = v === 'KAIKKI' ? naytokset.length : naytokset.filter(x => x.sali === v).length;
-      return `<button type="button" class="sali-tab${v === current ? ' active' : ''}" data-sali="${v}">${label} <span class="sali-tab-n">${n}</span></button>`;
+      return `<button type="button" class="sali-tab${v === current ? ' active' : ''}" data-sali="${v}"${v === 'KAIKKI' ? '' : ` data-nro="${saliNumero(v)}"`}>${label} <span class="sali-tab-n">${n}</span></button>`;
     }).join('');
     el.querySelectorAll('.sali-tab').forEach(btn => btn.addEventListener('click', () => {
       try { localStorage.setItem(PYSTY_SALI_KEY, btn.dataset.sali); } catch { /* storage blocked */ }
@@ -818,6 +829,8 @@ const ScheduleUI = (() => {
 
   function renderGrid() {
     if (!panelActive('ohjelmointi-panel') && !dragState) return;
+    const ids = new Set((currentSchedule?.naytokset ?? []).map(n => n.id));
+    selectedIds = new Set([...selectedIds].filter(id => ids.has(id)));
     renderNaytosStats();
     renderViikkoAukiolo();
     const container = document.getElementById('aikataulu-grid');
@@ -929,6 +942,7 @@ const ScheduleUI = (() => {
           if (dragState && n.id === dragState.id) return;
           const block = buildBlock(n, horizontal, headerOffset, colors);
           block.classList.toggle('pysty-teksti', sideways);
+          if (selectedIds.has(n.id)) block.classList.add('selected');
           dayCol.appendChild(block);
 
           // Same-theater gap after this show - visualizes minimivali_sama_sali,
@@ -976,6 +990,11 @@ const ScheduleUI = (() => {
       el.style.width = '';
     }
   }
+
+  // A theater as a numbered badge in that theater's own color (--sali-1..3 in
+  // the CSS) - the same colors mark the theater tabs and planning boxes.
+  const saliNumero = sali => sali.replace('STUDIO ', '');
+  const saliBadge = sali => `<span class="sali-badge" data-sali="${saliNumero(sali)}" title="${sali.replace('STUDIO ', 'Studio ')}">${saliNumero(sali)}</span>`;
 
   // The Finnish age rating as a small badge in the rating's own color (S
   // green, 7 yellow, 12 orange, 16 red, 18 black - the colors of the
@@ -1036,6 +1055,7 @@ const ScheduleUI = (() => {
     const settings = Storage.getSettings();
     const gap = settings.minimivali_eri_sali ?? 0;
     if (gap <= 0) return;
+    const step = snapOf(settings);
     const horizontal = settings.aikataulu_suunta === 'vaaka';
     const headerOffset = horizontal ? DAY_HEADER_W : DAY_HEADER_H;
 
@@ -1044,15 +1064,15 @@ const ScheduleUI = (() => {
       const bands = currentSchedule.naytokset
         .filter(n => n.id !== excludeId && n.paiva === paiva && n.sali !== sali)
         .map(n => {
-          // Starts snap to the quarter-hour grid, and each one is drawn as the
-          // quarter-hour slot it opens. The blocked starts are strictly less
-          // than `gap` away (a start exactly `gap` off is allowed), so the band
-          // runs from the first blocked slot to the end of the last one. Drawn
-          // as plain s±gap, it reached a whole slot too early on the left.
+          // Starts snap to the drag step, and each one is drawn as the slot it
+          // opens. The blocked starts are strictly less than `gap` away (a
+          // start exactly `gap` off is allowed), so the band runs from the
+          // first blocked slot to the end of the last one. Drawn as plain
+          // s±gap, it reached a whole slot too early on the left.
           const s = toMin(n.alkaa);
-          const firstBlocked = Math.floor((s - gap) / 15) * 15 + 15;
-          const lastBlocked = Math.ceil((s + gap) / 15) * 15 - 15;
-          return [Math.max(GRID_START, firstBlocked), Math.min(GRID_END, lastBlocked + 15)];
+          const firstBlocked = floorSnap(s - gap, step) + step;
+          const lastBlocked = ceilSnap(s + gap, step) - step;
+          return [Math.max(GRID_START, firstBlocked), Math.min(GRID_END, lastBlocked + step)];
         })
         .sort((a, b) => a[0] - b[0])
         .reduce((merged, [from, to]) => {
@@ -1098,6 +1118,17 @@ const ScheduleUI = (() => {
     const id = block.dataset.id;
     const n = currentSchedule.naytokset.find(x => x.id === id);
     if (!n) return;
+
+    // Ctrl/⌘/Shift-click adds the show to the selection or takes it out.
+    if (e.ctrlKey || e.metaKey || e.shiftKey) {
+      if (selectedIds.has(id)) selectedIds.delete(id); else selectedIds.add(id);
+      block.classList.toggle('selected', selectedIds.has(id));
+      renderNaytosStats();
+      return;
+    }
+    // Grabbing one of several selected shows moves them all.
+    if (selectedIds.has(id) && selectedIds.size > 1) { startGroupDrag(e, block); return; }
+    if (selectedIds.size) setSelection(new Set());
 
     const settings = Storage.getSettings();
     const horizontal = settings.aikataulu_suunta === 'vaaka';
@@ -1147,16 +1178,16 @@ const ScheduleUI = (() => {
     document.addEventListener('mouseup', onPointerUp);
   }
 
-  // The latest quarter-hour a show of this length can start and still end by
-  // the grid's end. Floored to the grid: clamping to the raw GRID_END - kesto
+  // The latest snap step a show of this length can start on and still end
+  // by the grid's end. Floored to the grid: clamping to the raw GRID_END - kesto
   // put a 121-minute film dragged to the far right at 21.59, and the search
   // for a free slot then stepped through 21.44, 21.29... - off-grid times that
   // sit within the cross-room gap of nearly every other start, so late-evening
   // drops landed hours away or were refused outright.
-  const latestStart = kesto => Math.floor((GRID_END - kesto) / 15) * 15;
+  const latestStart = (kesto, step = 15) => floorSnap(GRID_END - kesto, step);
 
   // Nearest start time in the target room+day where the show actually fits,
-  // searching outward from where the cursor put it in 15-min steps. Later is
+  // searching outward from where the cursor put it in snap steps. Later is
   // tried before earlier at equal distance: dropping onto the tail of another
   // show reads as "put it after that one". Returns the wanted start unchanged
   // when it already fits, or null when the whole room-day has no room for it.
@@ -1167,7 +1198,8 @@ const ScheduleUI = (() => {
   // that too is a question about this cell's day.
   function nearestFreeStart(base, wantedStart, kesto, settings) {
     const existing = currentSchedule?.naytokset ?? [];
-    const maxStart = latestStart(kesto);
+    const step = snapOf(settings);
+    const maxStart = latestStart(kesto, step);
     if (maxStart < GRID_START) return null;
 
     const wanted = Math.max(GRID_START, Math.min(wantedStart, maxStart));
@@ -1177,7 +1209,7 @@ const ScheduleUI = (() => {
     ).length === 0;
 
     if (fits(wanted)) return wanted;
-    for (let delta = 15; delta <= maxStart - GRID_START; delta += 15) {
+    for (let delta = step; delta <= maxStart - GRID_START; delta += step) {
       const later = wanted + delta;
       if (later <= maxStart && fits(later)) return later;
       const earlier = wanted - delta;
@@ -1196,42 +1228,52 @@ const ScheduleUI = (() => {
   // clears stops the cascade. A moved show also steps clear of other rooms'
   // starts (minimivali_eri_sali).
   //
+  // `shifted` (id -> start) gives shows a new place before any making room -
+  // the gap fill in dropCandidate - and those count as moves too.
+  //
   // Returns the moves ([] when nothing is in the way), or null when room
   // can't be made - a show would have to run past 24:00 or start before
   // 09:00, or the spot itself sits too close to another room's start, which
   // moving this room's shows can't fix. The caller then falls back to the
   // nearest free slot.
-  function makeRoomPlan(base, start, kesto, settings, afterIds) {
+  function makeRoomPlan(base, start, kesto, settings, afterIds, shifted = new Map()) {
     const gapSama = settings.minimivali_sama_sali;
     const gapEri = settings.minimivali_eri_sali ?? 0;
     const day = (currentSchedule?.naytokset ?? []).filter(x => x.id !== base.id && x.paiva === base.paiva);
+    const step = snapOf(settings);
     const otherStarts = day.filter(x => x.sali !== base.sali).map(x => toMin(x.alkaa));
     const crossClash = s => gapEri > 0 && otherStarts.some(o => Math.abs(o - s) < gapEri);
     if (crossClash(start)) return null;
 
     const room = day.filter(x => x.sali === base.sali);
+    const at = x => shifted.get(x.id) ?? toMin(x.alkaa);
     const mid = start + kesto / 2;
-    const isAfter = afterIds ? (x => afterIds.has(x.id)) : (x => toMin(x.alkaa) + x.kesto / 2 >= mid);
+    const isAfter = afterIds ? (x => afterIds.has(x.id)) : (x => at(x) + x.kesto / 2 >= mid);
     const moves = [];
+    // A show that keeps its place ends the cascade - unless a shifted show
+    // still follows, which must be recorded as moved.
+    const settled = (x, list, i, to) => to === toMin(x.alkaa) && !list.slice(i + 1).some(y => shifted.has(y.id));
 
     let edge = start + kesto;
-    for (const x of room.filter(isAfter).sort((a, b) => toMin(a.alkaa) - toMin(b.alkaa))) {
-      const from = toMin(x.alkaa);
-      let to = Math.max(from, Math.ceil((edge + gapSama) / 15) * 15);
-      if (to === from) break;
-      while (crossClash(to)) to += 15;
+    const later = room.filter(isAfter).sort((a, b) => at(a) - at(b));
+    for (let i = 0; i < later.length; i++) {
+      const x = later[i], from = toMin(x.alkaa);
+      let to = Math.max(at(x), ceilSnap(edge + gapSama, step));
+      if (to !== at(x)) while (crossClash(to)) to += step;
+      if (settled(x, later, i, to)) break;
       if (to + x.kesto > GRID_END) return null;
-      moves.push({ n: x, from, to });
+      if (to !== from) moves.push({ n: x, from, to });
       edge = to + x.kesto;
     }
     edge = start;
-    for (const x of room.filter(y => !isAfter(y)).sort((a, b) => toMin(b.alkaa) - toMin(a.alkaa))) {
-      const from = toMin(x.alkaa);
-      let to = Math.min(from, Math.floor((edge - gapSama - x.kesto) / 15) * 15);
-      if (to === from) break;
-      while (crossClash(to)) to -= 15;
+    const earlier = room.filter(y => !isAfter(y)).sort((a, b) => at(b) - at(a));
+    for (let i = 0; i < earlier.length; i++) {
+      const x = earlier[i], from = toMin(x.alkaa);
+      let to = Math.min(at(x), floorSnap(edge - gapSama - x.kesto, step));
+      if (to !== at(x)) while (crossClash(to)) to -= step;
+      if (settled(x, earlier, i, to)) break;
       if (to < GRID_START) return null;
-      moves.push({ n: x, from, to });
+      if (to !== from) moves.push({ n: x, from, to });
       edge = to;
     }
 
@@ -1261,34 +1303,67 @@ const ScheduleUI = (() => {
   // shows after it move later (or, if they can't - past midnight - the ones
   // before it move earlier). Failing all that, the nearest free slot (red,
   // with reasons) or nothing at all.
+  //
+  // Gap fill: a show moved within its own room-day past one or more of its
+  // neighbours leaves a hole where it was. The shows it passed over slide
+  // into that hole as a group (spacing kept): moving it right, they move
+  // earlier so the first starts where it used to start; moving it left, they
+  // move later so the last ends where it used to end. When that can't be
+  // done (another room's start in the way), the move goes ahead without it.
   function dropCandidate(base, wanted, kesto, settings) {
     const where = { sali: base.sali, paiva: base.paiva, wanted, pointedAt: wanted };
     const gapSama = settings.minimivali_sama_sali;
+    const step = snapOf(settings);
     const room = (currentSchedule?.naytokset ?? [])
       .filter(x => x.id !== base.id && x.paiva === base.paiva && x.sali === base.sali)
       .sort((a, b) => toMin(a.alkaa) - toMin(b.alkaa));
     const mid = wanted + kesto / 2;
     let idx = room.findIndex(x => toMin(x.alkaa) + x.kesto / 2 > mid);
     if (idx === -1) idx = room.length;
-    const prev = room[idx - 1], next = room[idx];
     const afterIds = new Set(room.slice(idx).map(x => x.id));
-    const maxStart = latestStart(kesto);
+    const maxStart = latestStart(kesto, step);
 
-    // Right after the previous show / right before the next one.
-    const lo = prev ? Math.ceil((toMin(prev.alkaa) + prev.kesto + gapSama) / 15) * 15 : GRID_START;
-    const hi = next ? Math.floor((toMin(next.alkaa) - gapSama - kesto) / 15) * 15 : maxStart;
-    const start = Math.max(GRID_START, Math.min(maxStart, Math.max(lo, Math.min(wanted, hi))));
+    const fills = [];
+    const orig = (currentSchedule?.naytokset ?? []).find(x => x.id === base.id);
+    if (orig && orig.sali === base.sali && orig.paiva === base.paiva) {
+      const os = toMin(orig.alkaa), oe = os + orig.kesto;
+      const origIdx = room.filter(x => toMin(x.alkaa) < os).length;
+      const shifted = new Map();
+      if (idx > origIdx) {
+        const group = room.slice(origIdx, idx);
+        const delta = toMin(group[0].alkaa) - os;
+        if (delta > 0) group.forEach(x => shifted.set(x.id, toMin(x.alkaa) - delta));
+      } else if (idx < origIdx) {
+        const group = room.slice(idx, origIdx);
+        const last = group[group.length - 1];
+        const delta = floorSnap(oe - (toMin(last.alkaa) + last.kesto), step);
+        if (delta > 0) group.forEach(x => shifted.set(x.id, toMin(x.alkaa) + delta));
+      }
+      if (shifted.size) fills.push(shifted);
+    }
+    fills.push(new Map());
 
-    // Where the block sits clear of its neighbours, it stays exactly there -
-    // a spot too close to another room's start is refused (red), as the
-    // no-start bands show. Only a start that had to snap against a neighbour
-    // may step a quarter hour along to clear another room's start.
-    const tries = start === wanted ? [start]
-      : [...new Set([start, start + 15, start - 15, start + 30, start - 30, hi, lo])]
-        .filter(t => t >= GRID_START && t <= maxStart);
-    for (const t of tries) {
-      const moves = makeRoomPlan(base, t, kesto, settings, afterIds);
-      if (moves) return { ...where, wanted: t, start: t, valid: true, snapped: false, moves };
+    for (const shifted of fills) {
+      const at = x => shifted.get(x.id) ?? toMin(x.alkaa);
+      const prev = room[idx - 1], next = room[idx];
+      // Right after the previous show / right before the next one.
+      const lo = prev ? ceilSnap(at(prev) + prev.kesto + gapSama, step) : GRID_START;
+      const hi = next ? floorSnap(at(next) - gapSama - kesto, step) : maxStart;
+      const start = Math.max(GRID_START, Math.min(maxStart, Math.max(lo, Math.min(wanted, hi))));
+
+      // Where the block sits clear of its neighbours, it stays exactly there -
+      // a spot too close to another room's start is refused (red), as the
+      // no-start bands show. Only a start that had to snap against a
+      // neighbour may step along (up to half an hour) to clear another
+      // room's start.
+      const offsets = [0];
+      for (let d = step; d <= 30; d += step) offsets.push(d, -d);
+      const tries = start === wanted ? [start]
+        : [...new Set([...offsets.map(d => start + d), hi, lo])].filter(t => t >= GRID_START && t <= maxStart);
+      for (const t of tries) {
+        const moves = makeRoomPlan(base, t, kesto, settings, afterIds, shifted);
+        if (moves) return { ...where, wanted: t, start: t, valid: true, snapped: false, moves };
+      }
     }
 
     const fitted = nearestFreeStart(base, wanted, kesto, settings);
@@ -1347,7 +1422,7 @@ const ScheduleUI = (() => {
       n.loppuu = toHHMM(m.to + n.kesto);
       extendOpeningHours(n.paiva, m.to, m.to + n.kesto);
     });
-    showWarning(`Näytös ${verb} kohtaan ${dot(candidate.start)}. Samasta salista siirrettiin tilaa tehden:\n` +
+    showWarning(`Näytös ${verb} kohtaan ${dot(candidate.start)}. Samassa salissa siirtyivät myös:\n` +
       moveLines(candidate.moves).join('\n'), 'ℹ️');
   }
 
@@ -1424,10 +1499,11 @@ const ScheduleUI = (() => {
     if (dayCol) {
       const headerOffset = horizontal ? DAY_HEADER_W : DAY_HEADER_H;
       const relPos = horizontal ? floatLeft - dayColRect.left : floatTop - dayColRect.top;
-      const snappedStart = round15(GRID_START + (relPos - headerOffset) / PX_PER_MIN);
+      const step = snapOf(settings);
+      const snappedStart = roundSnap(GRID_START + (relPos - headerOffset) / PX_PER_MIN, step);
       // Not clamped to the day's configured opening hours - dragging past them
       // is allowed, and extends that day's hours on drop (see onPointerUp).
-      const wanted = Math.max(GRID_START, Math.min(snappedStart, latestStart(kesto)));
+      const wanted = Math.max(GRID_START, Math.min(snappedStart, latestStart(kesto, step)));
 
       // `start` is where the drop will actually put it: `wanted` when that fits
       // or room can be made around it, the slot next to the show under the
@@ -1450,6 +1526,174 @@ const ScheduleUI = (() => {
     const timeSpan = dragState.timeSpan ?? (dragState.timeSpan = block.querySelector('.block-time'));
     if (timeSpan && candidate && timeSpan.textContent !== dot(candidate.pointedAt)) timeSpan.textContent = dot(candidate.pointedAt);
     showDragReason({ left: floatLeft, top: floatTop, right: floatLeft + ghostW, bottom: floatTop + ghostH }, horizontal, candidate);
+  }
+
+  // ── Selecting several shows ──────────────────────────────────────────────
+  // Pressing on an empty part of the grid and dragging draws a selection
+  // box; every show it touches is selected (Shift/Ctrl/⌘ adds to the current
+  // selection). A plain click on empty grid, or Esc, clears it. Grabbing any
+  // selected show then moves the whole selection (startGroupDrag).
+  function setSelection(ids) {
+    selectedIds = ids;
+    document.querySelectorAll('#aikataulu-grid .naytokset-block').forEach(b => b.classList.toggle('selected', ids.has(b.dataset.id)));
+    renderNaytosStats();
+  }
+
+  function onGridMouseDown(e) {
+    if (e.button !== 0 || e.target.closest('.naytokset-block') || !e.target.closest('.day-col')) return;
+    e.preventDefault();
+    const additive = e.shiftKey || e.ctrlKey || e.metaKey;
+    marquee = {
+      x0: e.clientX, y0: e.clientY, additive, moved: false, el: null,
+      base: additive ? new Set(selectedIds) : new Set(),
+      rects: [...document.querySelectorAll('#aikataulu-grid .naytokset-block')].map(b => ({ id: b.dataset.id, el: b, r: b.getBoundingClientRect() })),
+    };
+    document.addEventListener('mousemove', onMarqueeMove);
+    document.addEventListener('mouseup', onMarqueeUp);
+  }
+
+  function onMarqueeMove(e) {
+    const m = marquee;
+    if (!m) return;
+    if (!m.moved && Math.hypot(e.clientX - m.x0, e.clientY - m.y0) < 4) return;
+    m.moved = true;
+    if (!m.el) { m.el = document.createElement('div'); m.el.className = 'valinta-laatikko'; document.body.appendChild(m.el); }
+    const left = Math.min(m.x0, e.clientX), top = Math.min(m.y0, e.clientY);
+    const right = Math.max(m.x0, e.clientX), bottom = Math.max(m.y0, e.clientY);
+    setFixedBox(m.el, left, top, right - left, bottom - top);
+    m.current = new Set(m.base);
+    m.rects.forEach(({ id, el, r }) => {
+      if (r.left < right && r.right > left && r.top < bottom && r.bottom > top) m.current.add(id);
+      el.classList.toggle('selected', m.current.has(id));
+    });
+  }
+
+  function onMarqueeUp() {
+    document.removeEventListener('mousemove', onMarqueeMove);
+    document.removeEventListener('mouseup', onMarqueeUp);
+    const m = marquee;
+    marquee = null;
+    if (!m) return;
+    m.el?.remove();
+    if (m.moved) setSelection(m.current ?? m.base);
+    else if (!m.additive) setSelection(new Set());
+  }
+
+  // Moving the selection: every selected show shifts by the same time, and -
+  // when the grabbed show is dropped into another day or theater - by the
+  // same number of days and theaters, so the group keeps its shape. It is
+  // all or nothing: if any show would clash (same-room buffer, another
+  // room's start) or fall off the week or the grid, nothing moves and the
+  // reason is shown. Ghosts follow the cursor; markers show where each
+  // show would land.
+  function startGroupDrag(e, primaryEl) {
+    const settings = Storage.getSettings();
+    const horizontal = settings.aikataulu_suunta === 'vaaka';
+    const byId = new Map(currentSchedule.naytokset.map(n => [n.id, n]));
+    const items = [...selectedIds].filter(id => byId.has(id)).map(id => {
+      const el = document.querySelector(`#aikataulu-grid .naytokset-block[data-id="${id}"]`);
+      const buf = document.querySelector(`#aikataulu-grid .buffer-zone[data-id="${id}"]`);
+      return { n: byId.get(id), el, buf, r: el?.getBoundingClientRect(), br: buf?.getBoundingClientRect() };
+    });
+    items.forEach(it => [[it.el, it.r], [it.buf, it.br]].forEach(([el, r]) => {
+      if (!el) return;
+      el.classList.add('live-dragging');
+      el.style.position = 'fixed';
+      el.style.pointerEvents = 'none';
+      setFixedBox(el, r.left, r.top, r.width, r.height);
+      document.body.appendChild(el);
+    }));
+    groupDrag = { items, primary: items.find(it => it.n.id === primaryEl.dataset.id), x0: e.clientX, y0: e.clientY, settings, horizontal, plan: null, markers: [] };
+    document.addEventListener('mousemove', onGroupMove);
+    document.addEventListener('mouseup', onGroupUp);
+  }
+
+  function onGroupMove(e) {
+    const g = groupDrag;
+    if (!g) return;
+    const { settings, horizontal, primary } = g;
+    const dx = e.clientX - g.x0, dy = e.clientY - g.y0;
+    const under = document.elementFromPoint(e.clientX, e.clientY);
+    const dayCol = under && under.closest('#aikataulu-grid .day-col');
+    const cell = dayCol?.getBoundingClientRect();
+
+    g.items.forEach(it => {
+      if (it.el && it.r) setFixedBox(it.el, it.r.left + dx, it.r.top + dy, it.r.width, it.r.height);
+      if (it.buf && it.br) setFixedBox(it.buf, it.br.left + dx, it.br.top + dy, it.br.width, it.br.height);
+    });
+    g.markers.forEach(m => m.remove());
+    g.markers = [];
+    g.plan = null;
+    if (!dayCol || !primary?.r) { g.items.forEach(it => it.el?.classList.remove('drag-invalid')); hideDragReason(); return; }
+
+    const step = snapOf(settings);
+    const headerOffset = horizontal ? DAY_HEADER_W : DAY_HEADER_H;
+    const lead = horizontal ? primary.r.left + dx - cell.left : primary.r.top + dy - cell.top;
+    const delta = roundSnap(GRID_START + (lead - headerOffset) / PX_PER_MIN, step) - toMin(primary.n.alkaa);
+    const paivat = weekPaivat();
+    const dd = paivat.indexOf(dayCol.dataset.paiva) - paivat.indexOf(primary.n.paiva);
+    const dr = SALAT.indexOf(dayCol.dataset.sali) - SALAT.indexOf(primary.n.sali);
+
+    const moving = new Set(g.items.map(it => it.n.id));
+    const targets = g.items.map(it => {
+      const start = toMin(it.n.alkaa) + delta;
+      return { ...it.n, sali: SALAT[SALAT.indexOf(it.n.sali) + dr], paiva: paivat[paivat.indexOf(it.n.paiva) + dd],
+        alkaa: toHHMM(Math.max(0, start)), loppuu: toHHMM(Math.max(0, start) + it.n.kesto), start };
+    });
+    const others = currentSchedule.naytokset.filter(n => !moving.has(n.id));
+    let reasons = [];
+    if (targets.some(t => !t.sali || !t.paiva)) reasons = ['osa näytöksistä menisi viikon tai salien ulkopuolelle'];
+    else if (targets.some(t => t.start < GRID_START || t.start + t.kesto > GRID_END)) reasons = ['osa näytöksistä menisi klo 9-24 ulkopuolelle'];
+    else targets.forEach(t => {
+      const w = Scheduler.validateScreening(t, [...others, ...targets], settings);
+      if (w.length) reasons.push(`${t.nimi} (${t.paiva} ${dot(t.start)}): ${w[0]}`);
+    });
+    g.plan = { targets, valid: reasons.length === 0, changed: delta !== 0 || dd !== 0 || dr !== 0, reasons };
+
+    g.items.forEach(it => it.el?.classList.toggle('drag-invalid', !g.plan.valid));
+    if (g.plan.valid) {
+      targets.forEach(t => {
+        const c = document.querySelector(`#aikataulu-grid .day-col[data-sali="${t.sali}"][data-paiva="${t.paiva}"]`);
+        if (!c) return;
+        const mk = document.createElement('div');
+        mk.className = 'landing-marker';
+        mk.innerHTML = `<span class="block-time">${dot(t.start)}</span>`;
+        positionBox(mk, horizontal, headerOffset + (t.start - GRID_START) * PX_PER_MIN, Math.max(t.kesto * PX_PER_MIN, horizontal ? 40 : 20) + 'px', '2px', '2px');
+        c.appendChild(mk);
+        g.markers.push(mk);
+      });
+      hideDragReason();
+    } else {
+      const pr = primary.r;
+      showDragReason({ left: pr.left + dx, top: pr.top + dy, right: pr.right + dx, bottom: pr.bottom + dy }, horizontal, {
+        wanted: toMin(primary.n.alkaa) + delta, start: toMin(primary.n.alkaa) + delta, valid: false, moves: [], reasons,
+        title: `${g.items.length} näytöstä ei mahdu tähän`, outcome: 'Pudotus perutaan - mikään ei siirry.' });
+    }
+  }
+
+  function onGroupUp() {
+    document.removeEventListener('mousemove', onGroupMove);
+    document.removeEventListener('mouseup', onGroupUp);
+    const g = groupDrag;
+    groupDrag = null;
+    if (!g) return;
+    g.items.forEach(it => { it.el?.remove(); it.buf?.remove(); });
+    g.markers.forEach(m => m.remove());
+    hideDragReason();
+    const plan = g.plan;
+    if (plan?.valid && plan.changed) {
+      pushUndo();
+      plan.targets.forEach(t => {
+        const n = currentSchedule.naytokset.find(x => x.id === t.id);
+        Object.assign(n, { sali: t.sali, paiva: t.paiva, alkaa: toHHMM(t.start), loppuu: toHHMM(t.start + t.kesto) });
+        extendOpeningHours(t.paiva, t.start, t.start + t.kesto);
+      });
+      Storage.saveSchedule(currentSchedule);
+      showWarning(`${plan.targets.length} näytöstä siirrettiin.`, 'ℹ️');
+    } else if (plan && !plan.valid) {
+      showWarning(`Valittuja näytöksiä ei siirretty: ${plan.reasons[0]}${plan.reasons.length > 1 ? ` (ja ${plan.reasons.length - 1} muuta)` : ''}.`);
+    }
+    renderGrid();
   }
 
   // ── Moving a show to another theater ─────────────────────────────────────
@@ -1554,7 +1798,7 @@ const ScheduleUI = (() => {
   function showDragReason(anchor, horizontal, candidate) {
     const makingRoom = !!candidate?.moves?.length;
     if (!candidate || (!blockedAt(candidate) && !makingRoom)) { hideDragReason(); return; }
-    const key = JSON.stringify([candidate.wanted, candidate.start, candidate.valid, candidate.reasons, (candidate.moves ?? []).map(m => [m.n.id, m.to])]);
+    const key = JSON.stringify([candidate.title, candidate.wanted, candidate.start, candidate.valid, candidate.reasons, (candidate.moves ?? []).map(m => [m.n.id, m.to])]);
     if (dragReasonEl && key === dragReasonKey) { placeDragReason(anchor, horizontal); return; }
     dragReasonKey = key;
     const reasons = (candidate.reasons ?? []).map(r => r[0].toUpperCase() + r.slice(1));
@@ -1567,14 +1811,14 @@ const ScheduleUI = (() => {
     const line = (cls, text) => { const d = document.createElement('div'); d.className = cls; d.textContent = text; return d; };
     const shown = reasons.slice(0, 3);
     if (makingRoom) dragReasonEl.replaceChildren(
-      line('drag-reason-title', `Tehdään tilaa kohtaan ${dot(candidate.start)}`),
+      line('drag-reason-title', `Kohtaan ${dot(candidate.start)} - muut siirtyvät:`),
       ...moveLines(candidate.moves).map(t => line('drag-reason-item', t)),
     );
     else dragReasonEl.replaceChildren(
-      line('drag-reason-title', `Ei mahdu kohtaan ${dot(candidate.wanted)}`),
+      line('drag-reason-title', candidate.title ?? `Ei mahdu kohtaan ${dot(candidate.wanted)}`),
       ...shown.map(r => line('drag-reason-item', r)),
       ...(reasons.length > shown.length ? [line('drag-reason-item', `+ ${reasons.length - shown.length} muuta näytöstä`)] : []),
-      line('drag-reason-outcome', candidate.valid
+      line('drag-reason-outcome', candidate.outcome ? candidate.outcome : candidate.valid
         ? `Pudotettaessa siirtyy lähimpään vapaaseen kohtaan: ${dot(candidate.start)}`
         : 'Salissa ei ole tänä päivänä vapaata kohtaa - pudotus perutaan.'),
     );
@@ -1703,8 +1947,9 @@ const ScheduleUI = (() => {
     const headerOffset = horizontal ? DAY_HEADER_W : DAY_HEADER_H;
     const dayColRect = dayCol.getBoundingClientRect();
     const relPos = horizontal ? e.clientX - dayColRect.left : e.clientY - dayColRect.top;
-    const snappedStart = round15(GRID_START + (relPos - headerOffset) / PX_PER_MIN);
-    const wanted = Math.max(GRID_START, Math.min(snappedStart, latestStart(movie.kesto)));
+    const step = snapOf(settings);
+    const snappedStart = roundSnap(GRID_START + (relPos - headerOffset) / PX_PER_MIN, step);
+    const wanted = Math.max(GRID_START, Math.min(snappedStart, latestStart(movie.kesto, step)));
 
     const base = { id: '__preview__', sali: dayCol.dataset.sali, paiva: dayCol.dataset.paiva };
     const candidate = { ...dropCandidate(base, wanted, movie.kesto, settings), movieId: movie.id };
@@ -1914,7 +2159,7 @@ const ScheduleUI = (() => {
     if (!n) return;
     const settings = Storage.getSettings();
     const endMin = Scheduler.toMin(n.loppuu ?? toHHMM(toMin(n.alkaa) + n.kesto));
-    const newStart = Scheduler.round15(endMin + settings.minimivali_sama_sali);
+    const newStart = ceilSnap(endMin + settings.minimivali_sama_sali, snapOf(settings));
     const newEnd = newStart + n.kesto;
     pushUndo();
     currentSchedule.naytokset.push({
@@ -1981,7 +2226,8 @@ const ScheduleUI = (() => {
     const settings = Storage.getSettings();
     const gapSama = settings.minimivali_sama_sali;
     const gapEri = settings.minimivali_eri_sali ?? 0;
-    const ceil15 = m => Math.ceil(m / 15) * 15;
+    const step = snapOf(settings);
+    const ceil15 = m => ceilSnap(m, step);
     const moves = [];
     const roomDays = new Set(switched.map(x => x.paiva + '|' + x.sali));
     roomDays.forEach(key => {
@@ -2001,13 +2247,13 @@ const ScheduleUI = (() => {
         const tight = ceil15(prevNewEnd + Math.max(0, Math.min(origGap, gapSama)));
         let start;
         if (prevOldEnd == null || prevNewEnd > prevOldEnd) start = Math.max(origStart, tight);
-        else start = origGap <= gapSama + 14 ? Math.min(origStart, tight) : origStart;
+        else start = origGap <= gapSama + step - 1 ? Math.min(origStart, tight) : origStart;
         if (start === origStart) continue;
 
         if (gapEri > 0) {
           const collides = st => currentSchedule.naytokset.some(x =>
             x.paiva === paiva && x.sali !== sali && Math.abs(toMin(x.alkaa) - st) < gapEri);
-          for (let guard = 0; guard < 12 && collides(start); guard++) start += 15;
+          for (let guard = 0; guard < 36 && collides(start); guard++) start += step;
         }
         moves.push({ paiva, sali, nimi: cur.nimi, from: cur.alkaa, to: toHHMM(start), lateEnd: start + cur.kesto > GRID_END });
         cur.alkaa = toHHMM(start);
@@ -2091,9 +2337,9 @@ const ScheduleUI = (() => {
     };
 
     const bucket = roster.map(m => {
-      const inRooms = SALAT.filter(s => plan[s].some(c => c.id === m.id)).map(s => s.replace('STUDIO ', 'S'));
+      const inRooms = SALAT.filter(s => plan[s].some(c => c.id === m.id));
       return `<div class="plan-movie" draggable="true" data-id="${m.id}">
-          ${chip(m)}<span class="plan-movie-meta">${m.kesto} min${inRooms.length ? ` · <b>${inRooms.join(' ')}</b>` : ''}</span>
+          ${chip(m)}<span class="plan-movie-meta">${m.kesto} min${inRooms.length ? ` · Sali: ${inRooms.map(saliBadge).join('')}` : ''}</span>
         </div>`;
     }).join('') || '<p class="lista-tyhja">Ei elokuvia tällä viikolla. Lisää ne &ldquo;+ Lisää elokuvia&rdquo; -painikkeella.</p>';
 
@@ -2119,11 +2365,20 @@ const ScheduleUI = (() => {
             </div>
           </div>`;
       }).join('');
+      // A day whose shows can't fit between its earliest start and midnight
+      // (lengths plus cleanup buffers) is flagged: "Täytä ohjelma" would have
+      // to leave its lowest cards out.
+      const settings = Storage.getSettings();
+      const dayMinutes = p => plan[sali].filter(c => c.paivat.includes(p) && byId.has(c.id))
+        .reduce((sum, c, i) => sum + byId.get(c.id).kesto + (i ? settings.minimivali_sama_sali : 0), 0);
       const loadRow = paivat.map(p => {
         const n = perDay[p], slots = ROOM_DAY_SLOTS[p] ?? 2;
-        return `<span class="plan-load${n > slots + 1 ? ' heavy' : n === 0 ? ' empty' : ''}" title="${p}: ${n} näytöstä">${p} <b>${n}</b></span>`;
+        const over = dayMinutes(p) > 24 * 60 - toMin(settings.aukioloajat[p].avautuu);
+        const cls = over ? ' over' : n > slots + 1 ? ' heavy' : n === 0 ? ' empty' : '';
+        const title = over ? `${p}: ${n} näytöstä - ei mahdu klo 24 mennessä, alimmat jäävät pois` : `${p}: ${n} näytöstä`;
+        return `<span class="plan-load${cls}" title="${title}">${p} <b>${n}</b></span>`;
       }).join('');
-      return `<section class="plan-room" data-sali="${sali}">
+      return `<section class="plan-room" data-sali="${sali}" data-nro="${saliNumero(sali)}">
           <header><h3>${sali.replace('STUDIO ', 'Studio ')}</h3><span class="plan-room-sum">${Object.values(perDay).reduce((a, b) => a + b, 0)} näytöstä</span></header>
           <div class="plan-room-list" data-sali="${sali}">${cards || '<p class="plan-room-empty">Raahaa elokuvia tähän</p>'}</div>
           <footer class="plan-room-load">${loadRow}</footer>
@@ -2220,14 +2475,18 @@ const ScheduleUI = (() => {
     if (SALAT.every(s => plan[s].length === 0)) { alert('Raahaa ensin elokuvia saleihin.'); return; }
     const outside = roster.filter(m => !SALAT.some(s => plan[s].some(c => c.id === m.id)));
 
+    const alku = currentSchedule.viikkoAlku ?? (document.getElementById('viikko-alku').value || nextFriday());
+    const loppu = currentSchedule.viikkoLoppu ?? (document.getElementById('viikko-loppu').value || addDays(alku, 6));
+    const { naytokset, warnings, dropped } = Scheduler.populate(new Map(roster.map(m => [m.id, m])), plan, Storage.getSettings(), alku, loppu);
+
     const existing = currentSchedule.naytokset.length;
     let msg = existing > 0 ? `Nykyiset ${existing} näytöstä korvataan suunnitelman mukaisilla.` : '';
     if (outside.length) msg += `${msg ? '\n\n' : ''}Näitä elokuvia ei ole missään salissa, joten ne jäävät ilman näytöksiä:\n${outside.map(m => `• ${m.nimi}`).join('\n')}`;
+    // Shows past midnight are never placed: a day too full for its theater
+    // keeps its higher-priority shows, and the user hears which are left out.
+    if (dropped.length) msg += `${msg ? '\n\n' : ''}Nämä eivät mahdu klo 24 mennessä, joten ne jäävät pois:\n${dropped.map(d => `• ${d.paiva} ${d.sali.replace('STUDIO ', 'Studio ')}: ${d.nimi}`).join('\n')}`;
     if (msg && !confirm(`${msg}\n\nJatketaanko?`)) return;
 
-    const alku = currentSchedule.viikkoAlku ?? (document.getElementById('viikko-alku').value || nextFriday());
-    const loppu = currentSchedule.viikkoLoppu ?? (document.getElementById('viikko-loppu').value || addDays(alku, 6));
-    const { naytokset, warnings } = Scheduler.populate(new Map(roster.map(m => [m.id, m])), plan, Storage.getSettings(), alku, loppu);
     pushUndo();
     currentSchedule.viikkoAlku = alku;
     currentSchedule.viikkoLoppu = loppu;
@@ -2306,6 +2565,10 @@ const ScheduleUI = (() => {
     document.getElementById('btn-suunnittelu-lisaa').addEventListener('click', openPicker);
     document.getElementById('btn-tayta-ohjelma').addEventListener('click', fillProgram);
     document.getElementById('elokuva-lista').addEventListener('dragover', onRowDragOver);
+    document.getElementById('aikataulu-grid').addEventListener('mousedown', onGridMouseDown);
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape' && selectedIds.size && panelActive('ohjelmointi-panel')) setSelection(new Set());
+    });
     document.getElementById('btn-viikko-valinta-peruuta').addEventListener('click', closePicker);
     document.getElementById('btn-viikko-valinta-tallenna').addEventListener('click', commitPicker);
     document.getElementById('viikko-valinta-tbody').addEventListener('change', onPickerTableChange);

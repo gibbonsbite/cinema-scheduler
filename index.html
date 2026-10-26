@@ -109,7 +109,8 @@
 
   <!-- Right: schedule grid -->
   <div class="ohjelma-area">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+    <!-- Stays at the top of the window while the grid scrolls -->
+    <div class="ohjelma-tyokalut">
       <div class="card-title" style="margin-bottom:0">Viikko-ohjelma</div>
       <div style="display:flex;align-items:center;gap:10px">
       <button type="button" class="btn-tyhjenna" id="btn-tyhjenna-grid" title="Poista kaikki näytökset - viikon elokuvat säilyvät" disabled>🗑️ Tyhjennä</button>
@@ -162,13 +163,19 @@
 
       <!-- Show counts and gaps -->
       <div class="card sc-counts">
-        <div class="card-title">Näytösvälit (min)</div>
+        <div class="card-title">Näytösvälit</div>
         <div class="set-fields">
-          <label for="gap-sama">Sama sali: tauko näytösten välissä</label>
+          <label for="gap-sama">Sama sali: tauko näytösten välissä (min)</label>
           <input type="number" id="gap-sama" min="0" max="60">
-          <label for="gap-eri">Eri salit: alkujen väli</label>
+          <label for="gap-eri">Eri salit: alkujen väli (min)</label>
           <input type="number" id="gap-eri" min="0" max="60">
           <p class="set-hint">Eri salien näytökset eivät ala tätä lähempänä toisiaan. 0 = ei rajoitusta.</p>
+          <label for="raahaus-tarkkuus">Raahauksen tarkkuus</label>
+          <select id="raahaus-tarkkuus">
+            <option value="1">1 min</option><option value="5">5 min</option><option value="10">10 min</option>
+            <option value="15">15 min</option><option value="30">30 min</option>
+          </select>
+          <p class="set-hint">Askel, johon näytökset asettuvat raahattaessa ja siirrettäessä. &ldquo;Täytä ohjelma&rdquo; käyttää aina vartteja.</p>
         </div>
       </div>
 
