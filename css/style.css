@@ -645,12 +645,15 @@ select option {
 .block-lasten { font-size: 0.8em; line-height: 1; flex: 0 0 auto; }
 
 /* All three theaters side by side in the vertical view: the columns are too
-   narrow for text written across, so the folder turns on its side - the
-   title tab runs down the block's left edge and the showtime reads top to
-   bottom beside it (see renderGrid's `sideways`). */
+   narrow for text written across, so the title tab runs down the block's
+   left edge and the showtime beside it, both written top to bottom with
+   the letters upright (stacked, not turned on their side) - see
+   renderGrid's `sideways`. */
 .naytokset-block.pysty-teksti { flex-direction: row; align-items: flex-start; }
 .naytokset-block.pysty-teksti .block-tab {
   writing-mode: vertical-rl;
+  text-orientation: upright;
+  letter-spacing: -1px;
   width: 18px;
   height: auto;
   max-width: none;
@@ -662,6 +665,7 @@ select option {
 .naytokset-block.pysty-teksti .block-body,
 #aikataulu-grid .naytokset-block.pysty-teksti .block-body { /* beats the vertical view's top-aligned body */
   writing-mode: vertical-rl;
+  text-orientation: upright;
   align-self: stretch;
   flex: 1 1 auto;
   min-width: 0;
@@ -669,7 +673,8 @@ select option {
   justify-content: flex-start;
   padding: 6px 0;
 }
-.naytokset-block.pysty-teksti .block-time { font-size: 19px; }
+.naytokset-block.pysty-teksti .block-time { font-size: 15px; letter-spacing: -2px; line-height: 1; }
+.naytokset-block.pysty-teksti .block-nimi { line-height: 18px; font-size: 0.78em; }
 /* Time runs downward in the vertical layout: the showtime sits at the top
    of the body, where the show starts, not in the middle of a tall block. */
 #aikataulu-grid:not(.suunta-vaaka) .block-body { align-items: flex-start; padding-top: 5px; }
