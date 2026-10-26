@@ -22,6 +22,7 @@
 <!-- ── Tab bar ─────────────────────────────────────────────────────────── -->
 <nav id="tab-bar">
   <button class="tab-btn active" data-tab="kirjasto">Kirjasto</button>
+  <button class="tab-btn" data-tab="suunnittelu">Suunnittelu</button>
   <button class="tab-btn" data-tab="ohjelmointi">Ohjelmointi</button>
   <button class="tab-btn" data-tab="asetukset">Asetukset</button>
 </nav>
@@ -58,38 +59,48 @@
 </section>
 
 <!-- ══════════════════════════════════════════════════════════════════════ -->
-<!-- TAB 2: OHJELMOINTI                                                     -->
+<!-- TAB 2: SUUNNITTELU - which theaters and days each movie plays          -->
+<!-- ══════════════════════════════════════════════════════════════════════ -->
+<section id="suunnittelu-panel" class="tab-panel">
+  <div class="suunnittelu-bar">
+    <div>
+      <h2 class="settings-heading">Suunnittelu</h2>
+      <div class="suunnittelu-meta"><span id="suunnittelu-viikko"></span> · <span id="suunnittelu-yhteensa"></span></div>
+    </div>
+    <button class="btn btn-secondary" id="btn-suunnittelu-lisaa">+ Lisää elokuvia</button>
+    <button class="btn btn-primary" id="btn-tayta-ohjelma">⚙️ Täytä ohjelma</button>
+  </div>
+  <p class="card-hint suunnittelu-ohje">Raahaa elokuvat vasemmalta saleihin. Mitä ylempänä elokuva on salissa, sitä tärkeämpi se on: ylin saa illan paikan ja eniten päiviä. Päiviä voi muuttaa kortin painikkeista (&ldquo;auto&rdquo; valitsee ne sijan mukaan, &#x21BA; palauttaa automaattiset). Saman elokuvan voi laittaa useaan saliin. Raahaa kortti takaisin vasemmalle poistaaksesi sen salista. &ldquo;Täytä ohjelma&rdquo; laskee kellonajat ja avaa ohjelman Ohjelmointi-sivulle muokattavaksi.</p>
+  <div class="suunnittelu-alue" id="suunnittelu-sisalto"></div>
+</section>
+
+<!-- ══════════════════════════════════════════════════════════════════════ -->
+<!-- TAB 3: OHJELMOINTI                                                     -->
 <!-- ══════════════════════════════════════════════════════════════════════ -->
 <section id="ohjelmointi-panel" class="tab-panel">
 
-  <!-- Left: week setup -->
-  <aside class="viikko-setup">
-    <div class="card">
-      <div class="card-title">Viikko</div>
-      <div class="form-row half">
-        <div>
-          <label>Alku</label>
-          <input type="date" id="viikko-alku">
-        </div>
-        <div>
-          <label>Loppu</label>
-          <input type="date" id="viikko-loppu">
-        </div>
+  <!-- Left: the week, its movies and the Excel buttons - one panel -->
+  <aside class="viikko-setup card">
+    <div class="card-title">Viikko</div>
+    <div class="form-row half">
+      <div>
+        <label>Alku</label>
+        <input type="date" id="viikko-alku">
       </div>
-      <span id="viikko-label"></span>
+      <div>
+        <label>Loppu</label>
+        <input type="date" id="viikko-loppu">
+      </div>
     </div>
+    <span id="viikko-label"></span>
 
-    <div class="card">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-        <div class="card-title" style="margin-bottom:0">Elokuvat tällä viikolla</div>
-        <button type="button" id="btn-reset-kaikki-naytos" style="font-size:0.8em;font-weight:600;color:#555;background:none;border:none;cursor:pointer;padding:0" title="Palauta kaikkien näytösmäärät automaattisiksi">↺ Nollaa kaikki</button>
-      </div>
+    <div class="viikko-osa">
+      <div class="card-title">Elokuvat tällä viikolla</div>
       <button class="btn btn-secondary btn-block" id="btn-lisaa-viikkoon">+ Lisää elokuvia</button>
       <div id="elokuva-lista"></div>
     </div>
 
-    <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <button class="btn btn-primary" id="btn-luo-ohjelma">⚙️ Luo ohjelma</button>
+    <div class="viikko-osa viikko-napit">
       <button class="btn btn-success" id="btn-vie-excel">⬇️ Vie Exceliin</button>
       <button class="btn btn-secondary" id="btn-tuo-ohjelma" title="Tuo viikko-ohjelma Excel-tiedostosta (sama muoto kuin vienti)">⬆️ Tuo Excelistä</button>
       <input type="file" id="ohjelma-tuonti-tiedosto" accept=".xlsx" style="display:none">
@@ -120,7 +131,7 @@
 </section>
 
 <!-- ══════════════════════════════════════════════════════════════════════ -->
-<!-- TAB 3: ASETUKSET                                                       -->
+<!-- TAB 4: ASETUKSET                                                       -->
 <!-- ══════════════════════════════════════════════════════════════════════ -->
 <section id="asetukset-panel" class="tab-panel">
   <div class="settings-page">
@@ -139,10 +150,10 @@
       <!-- Operating hours -->
       <div class="card sc-hours">
         <div class="card-title">Aukioloajat</div>
-        <p class="card-hint">Aikaisin aloitus on turvaraja ja "viimeinen näytös alkaa" on illan ankkuri, johon ohjelma rakennetaan. Avaustavoite on aika, johon mennessä päivän ensimmäisen näytöksen halutaan alkavan &ndash; jos päivä jäisi lyhyemmäksi, sille lisätään näytöksiä. Painotus kertoo kuinka paljon näytöksiä päivä saa suhteessa muihin päiviin (vain suhteilla on väliä).</p>
+        <p class="card-hint">&ldquo;Täytä ohjelma&rdquo; rakentaa kunkin salin päivän illasta taaksepäin: viimeinen näytös alkaa &ldquo;viimeinen näytös alkaa&rdquo; -aikaan ja muut sen edelle. Aikaisin aloitus on turvaraja, jota aiemmin mikään näytös ei ala.</p>
         <div class="hours-table-wrap">
           <table class="hours-table">
-            <thead><tr><th>Päivä</th><th>Manuaalinen</th><th>Aikaisin aloitus</th><th>Avaustavoite</th><th>Viimeinen näytös alkaa</th><th>Painotus</th></tr></thead>
+            <thead><tr><th>Päivä</th><th>Manuaalinen</th><th>Aikaisin aloitus</th><th>Viimeinen näytös alkaa</th></tr></thead>
             <tbody id="hours-tbody"></tbody>
           </table>
         </div>
@@ -150,13 +161,8 @@
 
       <!-- Show counts and gaps -->
       <div class="card sc-counts">
-        <div class="card-title">Näytösmäärät ja -välit</div>
+        <div class="card-title">Näytösvälit (min)</div>
         <div class="set-fields">
-          <label for="viikko-naytokset">Näytöksiä viikossa (tavoite)</label>
-          <input type="number" id="viikko-naytokset" min="1" max="99">
-          <label for="min-per-sali">Näytöksiä vähintään / sali / päivä</label>
-          <input type="number" id="min-per-sali" min="0" max="6">
-          <div class="set-sub">Vähimmäisvälit (min)</div>
           <label for="gap-sama">Sama sali: tauko näytösten välissä</label>
           <input type="number" id="gap-sama" min="0" max="60">
           <label for="gap-eri">Eri salit: alkujen väli</label>
@@ -386,7 +392,8 @@
       document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
       btn.classList.add('active');
       document.getElementById(tab + '-panel').classList.add('active');
-      if (tab === 'ohjelmointi') ScheduleUI.buildWeekPanel();
+      if (tab === 'ohjelmointi') { ScheduleUI.buildWeekPanel(); ScheduleUI.renderGrid(); }
+      if (tab === 'suunnittelu') ScheduleUI.buildPlanPage();
       if (tab === 'asetukset') SettingsUI.render();
     });
   });

@@ -219,11 +219,21 @@ body {
 #ohjelmointi-panel { display: none; }
 #ohjelmointi-panel.active { display: flex; gap: 16px; flex-wrap: wrap; }
 
+/* The whole left column is one card - week, movie list and the Excel
+   buttons on a single background. */
 .viikko-setup {
-  flex: 0 0 280px;
-  min-width: 240px;
+  flex: 0 0 290px;
+  min-width: 250px;
+  align-self: flex-start;
 }
-.viikko-setup .card { margin-bottom: 12px; }
+.viikko-setup .form-row.half > div { flex: 1 1 0; min-width: 0; }
+.viikko-setup input[type="date"] { width: 100%; min-width: 0; }
+.viikko-osa {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-lighter);
+}
+.viikko-napit { display: flex; gap: 8px; flex-wrap: wrap; }
 
 #viikko-label {
   font-size: 0.82em;
@@ -276,7 +286,7 @@ body {
 #viikko-stats .stat-chip-arvo { font-weight: 700; color: var(--text-main); }
 /* Two-row layout: the title gets the whole first row to itself (it can wrap
    instead of being truncated by the controls), and the per-movie controls
-   (show count, reset, theater) sit on their own second row, indented to
+   (theater checkboxes, delete) sit on their own second row, indented to
    align under the title. */
 .elokuva-rivi {
   padding: 5px 4px;
@@ -298,7 +308,7 @@ body {
 .elokuva-rivi-controls {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 10px;
   margin: 2px 0 0 30px; /* aligns under the title (past handle + rank) */
 }
 .btn-poista-viikosta { margin-left: auto; }
@@ -321,28 +331,17 @@ body {
   min-width: 1.4em;
 }
 
-.el-naytos-tavoite {
-  width: 42px;
-  padding: 3px 4px;
-  border: 1px solid var(--border-color);
-  border-radius: 3px;
-  font-size: 0.95em;
-  text-align: center;
-  background: var(--bg-input);
-  color: var(--text-muted);
+/* The theaters a movie plays this week (the plan's `salit`) */
+.sali-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 0.92em;
+  color: var(--text-main);
+  cursor: pointer;
+  white-space: nowrap;
 }
-.el-naytos-tavoite.overridden { border-color: #2563eb; color: var(--text-main); font-weight: 700; background: var(--bg-card-alt); }
-.el-naytos-tavoite:not(.overridden) + .btn-reset-naytos { display: none; }
-
-.el-sali-ylitys {
-  padding: 3px 4px;
-  border: 1px solid var(--border-color);
-  border-radius: 3px;
-  font-size: 0.85em;
-  background: var(--bg-input);
-  color: var(--text-muted);
-}
-.el-sali-ylitys.overridden { border-color: #2563eb; color: var(--text-main); font-weight: 700; background: var(--bg-card-alt); }
+.sali-check input { margin: 0; cursor: pointer; }
 
 /* Native dropdown popups derive their surface from the select's own
    background - a semi-transparent one (the dark-mode .overridden state)
@@ -499,40 +498,72 @@ select option {
   position: absolute;
   left: 2px;
   right: 2px;
-  border-radius: 3px;
-  padding: 2px 4px;
-  /* color is set inline per block (schedule-ui.js movieColor()) - each
-     background needs its own black/white text for contrast, so no default
-     here */
-  font-size: 0.7em;
+  /* Drawn as a file folder: the title on a tab at the top left, the showtime
+     large on the body. The block itself is only the frame; the tab and body
+     paint the movie's color (--blk-bg / --blk-fg, set per block by
+     schedule-ui.js buildBlock - each background needs its own black/white
+     text, so no default text color here). */
+  --blk-bg: #8a94a8;
+  --blk-fg: #fff;
+  color: var(--blk-fg);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
   overflow: hidden;
   cursor: grab;
   user-select: none;
   z-index: 2;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+  filter: drop-shadow(0 1px 1.5px rgba(0,0,0,0.25));
   transition: opacity 0.1s;
 }
-.naytokset-block:hover { opacity: 0.9; filter: brightness(1.05); }
-.block-time { font-weight: 700; font-size: 0.9em; }
+.naytokset-block:hover { opacity: 0.92; filter: drop-shadow(0 1px 1.5px rgba(0,0,0,0.25)) brightness(1.05); }
+
+.block-tab {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  max-width: 100%;
+  height: 18px;
+  padding: 0 14px 0 6px;
+  background: var(--blk-bg);
+  border-radius: 5px 0 0 0;
+  /* the slanted right edge of a folder tab */
+  clip-path: polygon(0 0, calc(100% - 9px) 0, 100% 100%, 0 100%);
+}
 .block-nimi {
-  font-size: 1em;
+  font-size: 0.82em;
   font-weight: 700;
-  line-height: 1.2;
+  letter-spacing: 0.2px;
+  line-height: 18px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   text-shadow: 0 1px 1px rgba(0,0,0,0.2), 0 1px 1px rgba(255,255,255,0.2);
 }
-.block-kesto { font-size: 0.75em; opacity: 0.8; }
-.block-lasten {
-  position: absolute;
-  top: 1px;
-  right: 2px;
-  font-size: 0.9em;
+.block-lasten { font-size: 0.8em; line-height: 1; flex: 0 0 auto; }
+/* Time runs downward in the vertical layout: the showtime sits at the top
+   of the body, where the show starts, not in the middle of a tall block. */
+#aikataulu-grid:not(.suunta-vaaka) .block-body { align-items: flex-start; padding-top: 5px; }
+.block-body {
+  flex: 1 1 auto;
+  align-self: stretch;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  padding: 0 6px;
+  background: var(--blk-bg);
+  border-radius: 0 5px 5px 5px;
+}
+.naytokset-block { container-type: inline-size; }
+/* As large as the block's width allows: full size on the wide horizontal
+   blocks, scaled down to fit a narrow day column in the vertical layout. */
+.block-time {
+  font-size: clamp(12px, calc((100cqi - 12px) / 2.9), 22px);
+  font-weight: 800;
   line-height: 1;
+  letter-spacing: 0.3px;
+  font-variant-numeric: tabular-nums;
 }
 
 /* Same-theater gap (minimivali_sama_sali), shown right after each block */
@@ -613,21 +644,22 @@ select option {
 }
 .landing-marker .block-time {
   display: block;
-  padding: 2px 4px;
-  font-size: 0.72em;
+  padding: 3px 6px;
+  font-size: 1.15em;
   font-weight: 700;
   color: #1d4ed8;
 }
 :root[data-theme="dark"] .landing-marker { border-color: #7fb2ff; background: rgba(127, 178, 255, 0.14); }
 :root[data-theme="dark"] .landing-marker .block-time { color: #a9cbff; }
-.naytokset-block.making-room { outline: 2px dashed rgba(37, 99, 235, 0.85); outline-offset: 1px; }
+.naytokset-block.making-room .block-body,
+.naytokset-block.making-room .block-tab { box-shadow: inset 0 0 0 2px rgba(37, 99, 235, 0.9); }
 .drag-reason-outcome { margin-top: 4px; padding-top: 4px; border-top: 1px solid rgba(255,255,255,0.18); color: #c9d1e6; }
 
 /* Live drag feedback - see onPointerMove in schedule-ui.js */
 .naytokset-block.live-dragging {
   z-index: 5;
   cursor: grabbing;
-  box-shadow: 0 4px 10px rgba(0,0,0,0.35);
+  filter: drop-shadow(0 4px 6px rgba(0,0,0,0.35));
   opacity: 0.8;
 }
 /* The show cannot occupy the spot under the cursor. The drop still lands it on
@@ -635,11 +667,11 @@ select option {
    keeps tracking the cursor either way and its time label reads the cursor's
    time; the note beside it (.drag-reason) says why and where it would land. */
 .naytokset-block.drag-invalid {
-  background-color: #c0392b !important;
-  color: #fff !important; /* overrides the movie's own inline text color, which may be black */
-  outline: 2px dashed #7a1f16;
-  outline-offset: -2px;
+  /* !important beats the movie's own colors, set inline on the block */
+  --blk-bg: #c0392b !important;
+  --blk-fg: #fff !important;
 }
+.naytokset-block.drag-invalid .block-body { box-shadow: inset 0 0 0 2px #7a1f16; }
 
 /* Preview shown while dragging a movie from the list onto the grid to add a
    show - see onGridDragOver in schedule-ui.js. Reuses .drag-invalid above for
@@ -647,7 +679,6 @@ select option {
 .grid-drop-ghost {
   opacity: 0.6;
   pointer-events: none;
-  border: 2px dashed rgba(255,255,255,0.85);
 }
 
 /* ── Context menu ──────────────────────────────────────────────── */
@@ -771,6 +802,86 @@ select option {
 tr.row-duplicate td { color: #94a3b8; }
 tr.row-invalid td { background: #fef2f2; }
 .tuonti-status { font-size: 0.8em; color: #92400e; white-space: nowrap; }
+
+/* ── Suunnittelu (planning) page ───────────────────────────────── */
+.suunnittelu-bar { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.suunnittelu-bar > div:first-child { margin-right: auto; }
+.suunnittelu-meta { font-size: 0.85em; color: var(--text-muted); margin-top: 2px; }
+#suunnittelu-viikko { font-weight: 600; color: #2563eb; }
+.suunnittelu-ohje { max-width: 900px; margin: 0 0 12px; }
+.suunnittelu-alue { display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 16px; align-items: start; }
+.plan-bucket, .plan-room {
+  background: var(--bg-card);
+  border-radius: 6px;
+  box-shadow: 0 1px 4px var(--shadow-color);
+  padding: 10px;
+  border: 2px solid transparent;
+}
+.plan-bucket h3, .plan-room h3 {
+  font-size: 0.85em; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; color: var(--text-muted); margin: 2px 2px 8px;
+}
+.plan-bucket { position: sticky; top: 10px; }
+.plan-bucket.drop-target { border-color: #dc2626; background: rgba(220, 38, 38, 0.05); }
+.plan-bucket-list { display: flex; flex-direction: column; gap: 6px; }
+.plan-movie {
+  display: flex; flex-direction: column; gap: 3px; padding: 6px; border-radius: 5px;
+  background: var(--bg-card-alt); cursor: grab; font-size: 0.85em;
+}
+.plan-movie:hover { background: var(--bg-hover); }
+.plan-movie-meta { font-size: 0.85em; color: var(--text-muted); padding-left: 2px; }
+.plan-movie-meta b { color: #2563eb; }
+.plan-chip { display: inline-block; padding: 3px 8px; border-radius: 4px; font-weight: 700; line-height: 1.3; min-width: 0; overflow-wrap: anywhere; }
+
+.plan-rooms { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; align-items: start; }
+.plan-room header { display: flex; align-items: baseline; justify-content: space-between; }
+.plan-room-sum { font-size: 0.8em; color: var(--text-muted); font-weight: 600; }
+.plan-room-list {
+  min-height: 120px; display: flex; flex-direction: column; gap: 6px;
+  border-radius: 5px; padding: 4px; margin: 0 -4px;
+}
+.plan-room-list.drop-target { background: rgba(37, 99, 235, 0.07); outline: 2px dashed rgba(37, 99, 235, 0.5); }
+.plan-room-empty { margin: auto; color: var(--text-muted); font-size: 0.85em; opacity: 0.8; }
+.plan-drop-line { height: 3px; border-radius: 2px; background: #2563eb; margin: -1px 0; flex: 0 0 auto; }
+
+.plan-card {
+  border: 1px solid var(--border-light); border-radius: 6px; padding: 6px 7px;
+  background: var(--bg-card); cursor: grab; font-size: 0.85em;
+  box-shadow: 0 1px 2px var(--shadow-color);
+}
+.plan-card.dragging, .plan-movie.dragging { opacity: 0.4; }
+.plan-card-top { display: flex; align-items: flex-start; gap: 6px; }
+.plan-card-rank { font-weight: 800; color: var(--text-muted); min-width: 1.5em; padding-top: 3px; }
+.plan-card-top .plan-chip { flex: 1 1 auto; }
+.plan-card-x { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 0.95em; padding: 2px 3px; border-radius: 3px; }
+.plan-card-x:hover { color: #dc2626; background: var(--bg-hover); }
+.plan-card-days { display: flex; flex-wrap: wrap; align-items: center; gap: 3px; margin: 6px 0 0 calc(1.5em + 6px); }
+.plan-day {
+  font: inherit; font-size: 0.82em; font-weight: 700; width: 2.4em; padding: 2px 0; border-radius: 4px; cursor: pointer;
+  border: 1px solid var(--border-color); background: var(--bg-input); color: var(--text-muted);
+}
+.plan-day.on { background: #2563eb; border-color: #2563eb; color: #fff; }
+.plan-card-n { margin-left: auto; font-weight: 800; color: var(--text-main); min-width: 1.3em; text-align: right; }
+.plan-card-auto { font-size: 0.75em; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; color: var(--text-muted); padding: 1px 4px; border: 1px solid var(--border-lighter); border-radius: 3px; }
+.plan-card-reset { background: none; border: 1px solid var(--border-color); border-radius: 3px; cursor: pointer; color: var(--text-muted); padding: 0 5px; font-size: 0.95em; }
+.plan-card-reset:hover { color: var(--text-main); }
+
+.plan-room-load {
+  display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; padding-top: 7px;
+  border-top: 1px solid var(--border-lighter); font-size: 0.75em; color: var(--text-muted);
+}
+.plan-load { padding: 1px 5px; border-radius: 3px; background: var(--bg-card-alt); }
+.plan-load b { color: var(--text-main); }
+.plan-load.empty { opacity: 0.55; }
+.plan-load.heavy { background: #fef3c7; color: #92400e; }
+.plan-load.heavy b { color: #92400e; }
+:root[data-theme="dark"] .plan-load.heavy { background: rgba(251, 191, 36, 0.18); color: #fbbf24; }
+:root[data-theme="dark"] .plan-load.heavy b { color: #fbbf24; }
+
+@media (max-width: 1100px) {
+  .suunnittelu-alue { grid-template-columns: 1fr; }
+  .plan-bucket { position: static; }
+  .plan-bucket-list { flex-direction: row; flex-wrap: wrap; }
+}
 
 /* ── Settings panel ────────────────────────────────────────────── */
 /* Everything fits one laptop screen (1280x720 and up) without scrolling: the
@@ -935,5 +1046,3 @@ tr.row-invalid td { background: #fef2f2; }
 :root[data-theme="dark"] .tuonti-warnings,
 :root[data-theme="dark"] .tuonti-status { color: #fbbf24; }
 :root[data-theme="dark"] tr.row-invalid td { background: rgba(220,38,38,0.15); }
-:root[data-theme="dark"] .el-naytos-tavoite.overridden { background: rgba(37,99,235,0.2); }
-:root[data-theme="dark"] .el-sali-ylitys.overridden { background: rgba(37,99,235,0.2); }

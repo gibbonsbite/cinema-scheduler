@@ -70,561 +70,177 @@ const Scheduler = (() => {
     return Math.floor(min / 15) * 15;
   }
 
-  // Rank 0-2 (the top 3 movies) are always scheduled every eligible day of the
-  // week, one show per active day - a hard rule, not a historical average
-  // (26 weeks of reference schedules show rank 2/3 falling short of 7 days
-  // nearly half the time, but the rule going forward is unconditional).
-  const TOP_RANK_COUNT = 3;
+  // ── Filling the week from the plan ───────────────────────────────────────
+  //
+  // The user decides which movies each theater runs, in priority order, and
+  // on which days (the plan, edited on the Suunnittelu page and the theater
+  // checkboxes in the Ohjelmointi list): one show per movie in a theater on
+  // each of its checked days. All that is left to decide here is the times,
+  // and that is done the way the real schedules are built - from the
+  // evening backwards.
+  //
+  // Each theater-day is one back-to-back chain of shows ending on its
+  // evening anchor (the day's configured "viimeinen näytös alkaa"), so the
+  // day's opening time simply emerges from how many shows the room runs.
+  // Within a chain, kids' movies come first (their prime is the afternoon,
+  // and they must end by the kids' window), best-ranked kids title earliest,
+  // and the best-ranked adult film sits on the anchor (adult prime is the
+  // evening). Rank is the movie's position in that theater's list.
+  //
+  // The three rooms' anchors are staggered 30 min apart - the median gap
+  // between rooms' last starts across the reference weeks - and which room
+  // gets the latest is decided by its evening film, not by the room: across
+  // 32 reference weeks every room order occurs, and the one lean in the data
+  // is that the longer film starts earlier (61%). So the room whose evening
+  // film is shortest and lowest-ranked takes the latest anchor (a rank step
+  // weighs as much as 4 minutes of running time).
+  const ANCHOR_STAGGER = 30;
 
-  // Beyond the top 3, reference data shows a movie's total weekly shows and
-  // its number of active days converge to the same number (rank 3 ~5.1/5.1,
-  // rank 8 ~2.4/2.4 - essentially always exactly one show per active day), so
-  // a single tier table drives both the day-budget and the show-count cap,
-  // rather than two separately-tapered tables. Values are rank 3..8 (0-indexed
-  // from this table's own start), tail default 2 beyond that.
-  const RANK_TIERS = [5, 4, 4, 3, 3, 2];
+  // Two rooms never start at the same time: the reference has a cross-room
+  // start pair under 15 min apart on 0.2% of occasions. Applied as a floor
+  // under the user's own minimivali_eri_sali.
+  const MIN_ERI_SALI = 15;
 
-  // A full 3-room week holds ~45 shows (reference weeks run 38-61, median
-  // 46). The tier table above is calibrated on the 27-week reference average
-  // (13.7 distinct movies), where tail titles get squeezed by sheer roster
-  // size; with a small roster those weeks' spare capacity flows back to the
-  // tail. The one 9-movie reference week ran 45 shows with tiers
-  // 7,7,7,5,5,4,4,3,3 - buildTailTiers reproduces exactly that: any capacity
-  // left under the target is handed back +1 at a time to the leftmost tail
-  // rank sitting below its better-ranked neighbor, keeping the taper
-  // monotone. Big rosters already exceed the capacity and are left
-  // untouched. Values are in full-week (7-day) terms like RANK_TIERS.
-  // Fallback for settings.naytoksia_viikossa (editable in Asetukset).
-  const WEEK_SHOW_CAPACITY = 45;
+  // A room running more shows than a room usually does that day ends LATER
+  // as well as starting earlier - the reference splits the extra length
+  // between the two ends (a 3-show Sunday room runs 13:45-17:45 against the
+  // usual 2-show 14:45-17:15). Usual: 3 on Saturday, 2 on other days.
+  const EXTRA_SHOW_LATER = 30;
+  const TYPICAL_ROOM_SHOWS = { LA: 3 };
 
-  function buildTailTiers(movieCount, capacity) {
-    const nTop = Math.min(TOP_RANK_COUNT, movieCount);
-    const tiers = [];
-    for (let i = 0; i < movieCount - nTop; i++) {
-      tiers.push(i < RANK_TIERS.length ? RANK_TIERS[i] : 2);
-    }
-    let spare = capacity - nTop * 7 - tiers.reduce((a, b) => a + b, 0);
-    // A big roster overflows the week instead: 32 reference weeks run 41-49
-    // regular shows whether they carry 9 titles or 15 - the tail simply
-    // thins out, ending in several one-show titles. So an overflowing tail
-    // is scaled down to fit (never below one show each), and the rounding
-    // leftover is handed back by the spare loop below. Without this a
-    // 15-title roster generated 54 shows against the reference's 46-48.
-    if (spare < 0 && tiers.length > 0) {
-      const room = Math.max(tiers.length, capacity - nTop * 7);
-      const scale = room / tiers.reduce((a, b) => a + b, 0);
-      for (let i = 0; i < tiers.length; i++) tiers[i] = Math.max(1, Math.round(tiers[i] * scale));
-      // Rounding can land over the target too; trim the far tail back.
-      for (let i = tiers.length - 1; i >= 0 && tiers.reduce((a, b) => a + b, 0) > room; i--) {
-        if (tiers[i] > 1) tiers[i]--;
-      }
-      spare = room - tiers.reduce((a, b) => a + b, 0);
-    }
-    while (spare > 0) {
-      // Spread each round of spare shows across the taper's steps - one +1
-      // at the head of every descending run, left to right ([5,4,4,3,3,2]
-      // with 3 spare -> [5,5,4,4,3,3], the real 9-movie week's tail). Only
-      // when the tail is completely flat does its front rise, never past 7.
-      const heads = [];
-      for (let j = 1; j < tiers.length; j++) {
-        if (tiers[j] < tiers[j - 1]) heads.push(j);
-      }
-      if (heads.length === 0) {
-        if (tiers.length === 0 || tiers[0] >= 7) break;
-        tiers[0]++;
-        spare--;
-        continue;
-      }
-      for (const j of heads) {
-        if (spare === 0) break;
-        tiers[j]++;
-        spare--;
-      }
-    }
-    return tiers;
-  }
-
-  // Weekend-preference tie-break for day picking - in the reference data,
-  // partial-week movies play Saturday 83% of the time, Friday/Sunday ~55%,
-  // mid-week days ~45%, Monday 35%.
-  const KEEP_PRIORITY = ['LA', 'SU', 'PE', 'MA', 'TI', 'TO', 'KE'];
-
-  // How many shows each weekday carries relative to the others - the average
-  // per-day regular show counts across all 32 reference weeks. Saturday is
-  // the peak business day (9.2 shows on average, half again more than a
-  // weekday) and Monday the lightest (4.6). Day picking below fills days in proportion to
-  // these, so weekends pack tightest, exactly like the real schedules -
-  // a flat everyone-gets-the-same split would starve Saturday to feed Monday.
-  // These are only the fallback: settings.paivapainot (editable in the
-  // Asetukset hours table) carries the live values.
-  const DAY_WEIGHT = { MA: 4.6, TI: 5.6, KE: 5.9, TO: 5.8, PE: 6.3, LA: 9.2, SU: 6.6 };
-
-  // When each weekday's FIRST show should start, at the latest - the median
-  // first-show start per weekday across the 32 reference weeks (Saturday
-  // opens at 13:30, a plain weekday around 16:00). The backwards-packed
-  // chains usually reach this on their own; when a light roster would open
-  // a day later than this, the day loop tops the day up with extra shows
-  // until its opening lands as close to the target as an extra chain link
-  // can get it. Fallback for settings.avautuu_tavoite (editable in
-  // Asetukset).
-  const OPEN_TARGET = { MA: '16:00', TI: '16:15', KE: '16:00', TO: '16:15', PE: '16:30', LA: '13:30', SU: '14:00' };
-
-  // When a movie's day-budget is below its number of eligible days, its days
-  // are picked to fill the week PROPORTIONALLY: the day whose current load
-  // is smallest relative to its weight share comes first (weekend
-  // preference breaks ties). This both keeps every day of the week stocked
-  // (a fixed keep-order had every tail movie drop the SAME mid-week days,
-  // leaving Tue-Thu theaters running a single show) and gives Saturday its
-  // real-world peak instead of a flat split.
-  function pickBalancedDays(eligibleDays, budget, dayLoad, weightOf) {
-    if (budget >= eligibleDays.length) return eligibleDays;
-    const pressure = d => dayLoad.get(d) / weightOf(d);
-    const ranked = [...eligibleDays].sort((a, b) =>
-      (pressure(a) - pressure(b)) || (KEEP_PRIORITY.indexOf(a) - KEEP_PRIORITY.indexOf(b)));
-    const keep = new Set(ranked.slice(0, budget));
-    return eligibleDays.filter(d => keep.has(d)); // preserve calendar order
-  }
-
-  // naytosTavoitteet: optional { [movieId]: totalShowsThisWeek } overrides. A
-  // movie without an entry is capped at its rank-tier day count instead (see
-  // TOP_RANK_COUNT/RANK_TIERS above). A movie WITH an explicit entry isn't
-  // bound to the rank-based day-budget - it can use any of its eligible days
-  // to reach that total - and is hard-capped at exactly that many shows for
-  // the week.
-  // saliYlitys: optional { [movieId]: saliName } manual theater assignment.
-  // A movie with an entry is pinned into that room's chain each day it
-  // plays, bypassing the rank-based room fill (see room assignment inside
-  // the day loop below); everything else routes around the pin.
-  function schedule(selectedMovies, settings, viikkoAlku, viikkoLoppu, naytosTavoitteet = {}, saliYlitys = {}) {
+  // movies: Map of movie id -> library movie, for the week's movies.
+  // plan: { 'STUDIO 1': [{ id, paivat: ['PE', ...] }, ...], ... } - each
+  // theater's movies, highest priority first.
+  // Returns { naytokset, warnings }: warnings name any room-day whose shows
+  // could not all fit between the day's earliest start and midnight - they
+  // are still placed (nothing the user planned is dropped), running late.
+  function populate(movies, plan, settings, viikkoAlku, viikkoLoppu) {
     const naytokset = [];
+    const warnings = [];
     const paivat = getPaivat(viikkoAlku, viikkoLoppu);
-
-    // selectedMovies is already rank-ordered (index 0 = most popular/highest priority)
-
-    // Which days each movie plays, and how many shows it runs each of those
-    // days, are weekly properties decided once up front in a single pass in
-    // rank order (deterministic - this replaces the old greedy
-    // fill-until-full repeat loop). Rank 0-2 always get every eligible day
-    // (TOP_RANK_COUNT); beyond that, RANK_TIERS gives the day-budget and
-    // pickBalancedDays spreads those budgets across the week's emptiest
-    // days, so mid-week days stay stocked instead of every tail movie
-    // keeping the same weekend subset. Default is exactly one show per
-    // active day; an explicit naytosTavoitteet target above the day count
-    // adds repeats to the movie's lightest days, one below it keeps only
-    // that many of its days - both load-balanced the same way.
-    const dailyCounts = new Map();
-    const dayLoad = new Map(paivat.map(p => [p, 0])); // total shows assigned per day so far
-    const tailTiers = buildTailTiers(selectedMovies.length,
-      settings.naytoksia_viikossa ?? WEEK_SHOW_CAPACITY);
-    const painot = settings.paivapainot ?? {};
-    const weightOf = d => painot[d] ?? DAY_WEIGHT[d] ?? 6;
-
-    selectedMovies.forEach((movie, rankIndex) => {
-      const eligibleDays = movie.lastenelokuva
-        ? paivat.filter(p => settings.lastenelokuva.paivat.includes(p))
-        : paivat;
-
-      let days;
-      if (naytosTavoitteet[movie.id] != null || rankIndex < TOP_RANK_COUNT) {
-        days = eligibleDays;
-      } else {
-        const tier7 = tailTiers[rankIndex - TOP_RANK_COUNT];
-        const budget = Math.max(1, Math.round(tier7 * paivat.length / 7));
-        days = pickBalancedDays(eligibleDays, budget, dayLoad, weightOf);
-      }
-      const cap = naytosTavoitteet[movie.id] ?? days.length;
-
-      const counts = new Map();
-      if (cap <= days.length) {
-        pickBalancedDays(days, cap, dayLoad, weightOf).forEach(d => counts.set(d, 1));
-      } else {
-        days.forEach(d => counts.set(d, 1));
-        for (let extra = 0; extra < cap - days.length; extra++) {
-          const pressure = d => (dayLoad.get(d) + counts.get(d)) / weightOf(d);
-          const lightest = [...days].sort((a, b) =>
-            (pressure(a) - pressure(b)) || (KEEP_PRIORITY.indexOf(a) - KEEP_PRIORITY.indexOf(b)))[0];
-          counts.set(lightest, counts.get(lightest) + 1);
-        }
-      }
-      counts.forEach((c, d) => dayLoad.set(d, dayLoad.get(d) + c));
-      dailyCounts.set(movie.id, counts);
-    });
-
-    // ── Per-day floor: every room runs at least min_naytoksia_salissa shows ──
-    // A day short of the floor (floor x 3 rooms in total) pulls one show at a
-    // time from the most overloaded day that can spare one, choosing the
-    // lowest-ranked movie that plays the donor day but not the short day (and
-    // is eligible on it). Moving - never adding - keeps the weekly total and
-    // every movie's show count exactly as the tiers decided. Note this
-    // intentionally diverges from the reference schedules, which do run a
-    // single-show room on 6.5% of theater-days (mostly Mondays); the floor is
-    // a business rule. If the roster simply can't cover the floor (too few
-    // movies, kids-day restrictions), it stays best-effort.
-    const minPerRoom = settings.min_naytoksia_salissa ?? 2;
-    const dayFloor = minPerRoom * SALAT.length;
-    let floorGuard = paivat.length * dayFloor;
-    while (floorGuard-- > 0) {
-      const short = paivat
-        .filter(d => dayLoad.get(d) < dayFloor)
-        .sort((a, b) => dayLoad.get(a) - dayLoad.get(b))[0];
-      if (!short) break;
-      let best = null;
-      selectedMovies.forEach((movie, rankIndex) => {
-        const counts = dailyCounts.get(movie.id);
-        if (counts.get(short)) return; // already plays the short day
-        if (movie.lastenelokuva && !settings.lastenelokuva.paivat.includes(short)) return;
-        counts.forEach((c, d) => {
-          if (c === 0 || dayLoad.get(d) - 1 < dayFloor) return; // donor must stay at the floor
-          const pressure = dayLoad.get(d) / weightOf(d);
-          if (!best || pressure > best.pressure ||
-              (pressure === best.pressure && rankIndex > best.rankIndex)) {
-            best = { movie, rankIndex, from: d, pressure };
-          }
-        });
-      });
-      if (!best) break;
-      const counts = dailyCounts.get(best.movie.id);
-      counts.set(best.from, counts.get(best.from) - 1);
-      if (counts.get(best.from) === 0) counts.delete(best.from);
-      counts.set(short, 1);
-      dayLoad.set(best.from, dayLoad.get(best.from) - 1);
-      dayLoad.set(short, dayLoad.get(short) + 1);
-    }
-
-    // ── Per-day construction: backwards-packed chains from evening anchors ──
-    //
-    // Reference schedules are built from the evening, not the morning: each
-    // weekday's LAST showtime is remarkably stable (that's the configured
-    // sulkeutuu - the "evening anchor", when the day's final show starts),
-    // while the FIRST showtime swings by hours depending on how many shows
-    // that day runs. Each theater-day is one back-to-back chain of shows
-    // ending on its anchor, so the day's opening time simply EMERGES from
-    // the chain lengths - weekdays open later than Saturday purely because
-    // they run fewer shows; no opening time is hardcoded anywhere. Within a
-    // chain, kids' movies always come first (their prime is the afternoon)
-    // and the best-ranked adult sits on the anchor (adult prime is the
-    // evening). The three rooms' anchors are staggered 30 min apart - the
-    // median gap between rooms' last starts across 27 reference weeks.
-    //
-    // Which room gets the latest anchor is NOT a matter of rank. Across 32
-    // reference weeks the day's very last show is the #1 title on only 15%
-    // of days - no more often than any other rank - and every room order
-    // occurs. The one lean in the data is length: of two rooms' last shows,
-    // the longer film starts earlier 61% of the time. So the anchors go to
-    // the rooms by their evening film's length and rank (anchorOrder in
-    // buildDay). Handing STUDIO 1 the latest anchor every day made the #1
-    // title the day's last show 94% of the time.
-    const ANCHOR_STAGGER = 30; // min between consecutive rooms' evening anchors
-
-    // Two rooms never start at the same time: the reference has a
-    // cross-room start pair under 15 min apart on 0.2% of occasions (vs 2%
-    // for the generator before this rule). Applied as a floor under the
-    // user's own minimivali_eri_sali.
-    const MIN_ERI_SALI = 15;
-
-    // A room running more shows than the day usually gives a room ends LATER
-    // as well as starting earlier - the reference splits the extra length
-    // between the two ends. A 3-show Sunday room runs 13:45-17:45 against the
-    // usual 2-show 14:45-17:15, a 4-show Saturday room 13:15-19:45 against
-    // 14:30-19:00. Without this, every extra show went on the front of the
-    // day, and those rooms opened at 11-12 o'clock. The usual count is the
-    // day's weight split over the three rooms (Saturday 3, others 2).
-    const EXTRA_SHOW_LATER = 30;
+    const gapSama = settings.minimivali_sama_sali;
+    const gapEri = Math.max(settings.minimivali_eri_sali ?? 0, MIN_ERI_SALI);
+    const kidsEarliest = toMin(settings.lastenelokuva.aikaisintaan);
+    const kidsLatestEnd = toMin(settings.lastenelokuva.viimeistaan);
 
     paivat.forEach(paiva => {
       const aukiolo = settings.aukioloajat[paiva];
       const floorMin = toMin(aukiolo.avautuu);             // absolute earliest start (safety floor)
       const anchorMin = floor15(toMin(aukiolo.sulkeutuu)); // when the day's last show starts
-      const gapSama = settings.minimivali_sama_sali;
-      const gapEri = settings.minimivali_eri_sali;
-      const kidsEarliest = toMin(settings.lastenelokuva.aikaisintaan);
-      const kidsLatestEnd = toMin(settings.lastenelokuva.viimeistaan);
-      const typicalRoomShows = Math.max(1, Math.round(weightOf(paiva) / SALAT.length));
+      const typicalRoomShows = TYPICAL_ROOM_SHOWS[paiva] ?? 2;
 
-      // Today's showings - one entry per show, so a naytosTavoitteet target
-      // above the day count appears here as many times as it plays today.
-      let showings = [];
-      selectedMovies.forEach((movie, rankIndex) => {
-        const count = dailyCounts.get(movie.id).get(paiva) ?? 0;
-        for (let i = 0; i < count; i++) showings.push({ movie, rankIndex });
+      // The plan's shows for today, room by room.
+      const rooms = Object.fromEntries(SALAT.map(sali => [sali, []]));
+      SALAT.forEach(sali => (plan[sali] ?? []).forEach((card, rankIndex) => {
+        const movie = movies.get(card.id);
+        if (movie && (card.paivat ?? []).includes(paiva)) rooms[sali].push({ movie, rankIndex });
+      }));
+
+      const chains = {};
+      SALAT.forEach(sali => {
+        const kids = rooms[sali].filter(x => x.movie.lastenelokuva).sort((a, b) => a.rankIndex - b.rankIndex);
+        const adults = rooms[sali].filter(x => !x.movie.lastenelokuva).sort((a, b) => b.rankIndex - a.rankIndex);
+        chains[sali] = [...kids, ...adults];
       });
-      if (showings.length === 0) return;
+      const eveningScore = sali => {
+        const last = chains[sali][chains[sali].length - 1];
+        return last ? last.movie.kesto - 4 * last.rankIndex : 0;
+      };
+      const anchorOrder = [...SALAT].sort((a, b) => eveningScore(a) - eveningScore(b));
+      const placedToday = [];
 
-      const isPinned = s => SALAT.includes(saliYlitys[s.movie.id]);
+      anchorOrder.forEach((sali, staggerIdx) => {
+        const chain = chains[sali];
+        if (chain.length === 0) return;
 
-      // Builds the whole day from a list of showings - room assignment,
-      // chain ordering, backwards packing - and returns the placements as
-      // [{ sali, start, s }] without touching anything outside, so the
-      // opening-target pass below can build a trial day with one more show
-      // and simply discard it if it doesn't help.
-      const buildDay = (dayShowings) => {
+        // Pack backwards from this room's anchor: the last show starts ON the
+        // anchor; each earlier show ends one cleanup buffer (floored to the
+        // :15 grid) before the next starts. A kids-only chain can't hold the
+        // evening slot - it ends where the kids' end-time rule allows.
+        let anchor = anchorMin - staggerIdx * ANCHOR_STAGGER
+          + EXTRA_SHOW_LATER * Math.max(0, chain.length - typicalRoomShows);
+        const last = chain[chain.length - 1];
+        if (last.movie.lastenelokuva) anchor = Math.min(anchor, floor15(kidsLatestEnd - last.movie.kesto));
+        const starts = new Array(chain.length);
+        for (let i = chain.length - 1; i >= 0; i--) {
+          const x = chain[i];
+          let start = i === chain.length - 1 ? anchor : floor15(starts[i + 1] - gapSama - x.movie.kesto);
+          if (x.movie.lastenelokuva) start = Math.min(start, floor15(kidsLatestEnd - x.movie.kesto));
+          starts[i] = start;
+        }
 
-        // ── Room assignment ──
-        // Counts are balanced across rooms (7 shows -> 3+2+2). On a normal day
-        // the remainder goes to STUDIO 1 first; on a LIGHT day (5 shows or
-        // fewer) it's the big room that rests - across the 27 reference weeks'
-        // light days STUDIO 1 averages the fewest shows (1.46) and STUDIO 2 the
-        // most (1.81), so the remainder order flips to S2 -> S3 -> S1. This is
-        // what keeps STUDIO 3 running 2 shows on a 5-6 show Monday/Tuesday
-        // instead of eating every shortfall.
-        const rooms = { 'STUDIO 1': [], 'STUDIO 2': [], 'STUDIO 3': [] };
-        const base = Math.floor(dayShowings.length / SALAT.length);
-        const rem = dayShowings.length % SALAT.length;
-        const remOrder = dayShowings.length <= 5
-          ? ['STUDIO 2', 'STUDIO 3', 'STUDIO 1']
-          : SALAT;
-        const roomCap = {};
-        SALAT.forEach(s => { roomCap[s] = base; });
-        remOrder.slice(0, rem).forEach(s => { roomCap[s]++; });
-
-        const unassigned = [];
-        dayShowings.forEach(s => {
-          if (isPinned(s)) rooms[saliYlitys[s.movie.id]].push(s);
-          else unassigned.push(s);
-        });
-        unassigned.sort((a, b) => a.rankIndex - b.rankIndex);
-
-        const free = sali => rooms[sali].length < roomCap[sali];
-
-        // Strict rank fill: saliYlitys pins first (above), then the best
-        // remaining titles pack STUDIO 1 full, the next STUDIO 2, and the rank
-        // tail lands in STUDIO 3 - in the reference schedules S1's shows are
-        // 68% top-3 titles while S3's are only 9%; a per-room rank-rotation
-        // here previously parked a top title in S3 every single day. Filling
-        // by strict rank also keeps each movie in the same room day after day,
-        // as the reference does.
-        unassigned.forEach(s => {
-          const target = SALAT.find(free)
-            ?? SALAT.reduce((a, b) => rooms[a].length <= rooms[b].length ? a : b);
-          rooms[target].push(s);
-        });
-
-        // Every room's evening should end on an adult show (548/561 reference
-        // theater-days do). A room that came out all-kids swaps its lowest-
-        // ranked kid for the closest-ranked spare adult from a room holding
-        // two or more adults, so the rooms' rank tiering survives the swap -
-        // but a top-3 kids title is never traded down into STUDIO 3 (on kids-
-        // heavy days the reference simply runs the room kids-only instead,
-        // e.g. a Tuesday STUDIO 1 of VAIANA + KÄTYRIT with the two tail
-        // adults stacked in S3). Pinned shows never move. With no acceptable
-        // spare adult, the kids-only chain simply ends early on the kids'
-        // end-time rule (see packOnce).
-        SALAT.forEach(sali => {
-          const shows = rooms[sali];
-          if (shows.length === 0 || shows.some(x => !x.movie.lastenelokuva)) return;
-          const swappable = shows.filter(x => !isPinned(x));
-          if (swappable.length === 0) return;
-          const kid = swappable.reduce((a, b) => a.rankIndex >= b.rankIndex ? a : b);
-          let donor = null, adult = null;
-          SALAT.forEach(other => {
-            if (other === sali) return;
-            if (kid.rankIndex < TOP_RANK_COUNT && other === 'STUDIO 3') return;
-            const adults = rooms[other].filter(x => !x.movie.lastenelokuva && !isPinned(x));
-            if (rooms[other].filter(x => !x.movie.lastenelokuva).length < 2) return;
-            adults.forEach(a => {
-              if (!adult || Math.abs(a.rankIndex - kid.rankIndex) < Math.abs(adult.rankIndex - kid.rankIndex)) {
-                donor = other;
-                adult = a;
-              }
-            });
-          });
-          if (!adult) return;
-          rooms[sali][rooms[sali].indexOf(kid)] = adult;
-          rooms[donor][rooms[donor].indexOf(adult)] = kid;
-        });
-
-        // ── Chain ordering and backwards packing per room ──
-        const entries = [];     // the day's placements, collected room by room
-        const placedToday = []; // starts already emitted today (for the cross-theater spacing)
-
-        // Chronological chain per room: kids first, best-ranked kids title
-        // earliest (it takes the prime matinee slot); adults after, ordered so
-        // the BEST adult lands last, on the room's evening anchor.
-        const chains = {};
-        SALAT.forEach(sali => {
-          const roomShows = rooms[sali];
-          const kids = roomShows.filter(x => x.movie.lastenelokuva).sort((a, b) => a.rankIndex - b.rankIndex);
-          const adults = roomShows.filter(x => !x.movie.lastenelokuva).sort((a, b) => b.rankIndex - a.rankIndex);
-          chains[sali] = [...kids, ...adults];
-        });
-        // Anchor order (see ANCHOR_STAGGER): the room whose evening film is
-        // shortest and lowest-ranked takes the latest anchor. A rank step
-        // weighs as much as 4 min of running time - fitted on the reference,
-        // it puts the #1 title on the day's last slot on 18% of days (15% in
-        // the reference) and spreads the six room orders about as evenly.
-        const eveningScore = sali => {
-          const last = chains[sali][chains[sali].length - 1];
-          return last ? last.movie.kesto - 4 * last.rankIndex : 0;
-        };
-        const anchorOrder = [...SALAT].sort((a, b) => eveningScore(a) - eveningScore(b));
-
-        anchorOrder.forEach((sali, staggerIdx) => {
-          const chain = chains[sali];
-          if (chain.length === 0) return;
-
-          // Pack backwards from this room's anchor: the last show starts ON
-          // the anchor; each earlier show ends one cleanup buffer (floored to
-          // the :15 grid) before the next starts. A kids-only chain can't hold
-          // the evening slot - it ends where the kids' end-time rule allows.
-          // The morning floor is a hard lower clamp; a chain long enough to
-          // hit it (possible only with extreme manual repeat targets) drops
-          // its lowest-priority show until it fits.
-          const packOnce = (arr) => {
-            let anchor = anchorMin - staggerIdx * ANCHOR_STAGGER
-              + EXTRA_SHOW_LATER * Math.max(0, arr.length - typicalRoomShows);
-            const last = arr[arr.length - 1];
-            if (last.movie.lastenelokuva) {
-              anchor = Math.min(anchor, floor15(kidsLatestEnd - last.movie.kesto));
-            }
-            const st = new Array(arr.length);
-            for (let i = arr.length - 1; i >= 0; i--) {
-              const s = arr[i];
-              let start = i === arr.length - 1
-                ? anchor
-                : floor15(st[i + 1] - gapSama - s.movie.kesto);
-              if (s.movie.lastenelokuva) {
-                start = Math.min(start, floor15(kidsLatestEnd - s.movie.kesto));
-              }
-              st[i] = Math.max(start, floorMin);
-            }
-            return st;
-          };
-          const overlaps = (arr, st) => arr.some((s, i) =>
-            i > 0 && st[i - 1] + arr[i - 1].movie.kesto + gapSama > st[i]);
-
-          let starts = packOnce(chain);
-          while (chain.length > 1 && overlaps(chain, starts)) {
-            let worst = 0;
-            chain.forEach((s, i) => { if (s.rankIndex > chain[worst].rankIndex) worst = i; });
-            chain.splice(worst, 1);
-            starts = packOnce(chain);
+        // A chain too long for its day starts at the safety floor instead and
+        // runs on from there - every planned show stays.
+        if (starts[0] < floorMin) {
+          const shift = round15(floorMin - starts[0]);
+          for (let i = 0; i < starts.length; i++) starts[i] += shift;
+          for (let i = 1; i < starts.length; i++) {
+            const minStart = round15(starts[i - 1] + chain[i - 1].movie.kesto + gapSama);
+            if (starts[i] < minStart) starts[i] = minStart;
           }
+        }
 
-          // Forward compaction: if the kids end-time clamp opened a gap beyond
-          // buffer+rounding, pull EVERYTHING after the gap earlier until the
-          // gap is an ordinary cleanup buffer again. Tight packing is a hard
-          // rule - a room never sits idle longer than cleanup+rounding - and it
-          // outranks exact anchor adherence: the evening show slides earlier
-          // than the nominal anchor only in the rare case the kids rule forces
-          // it (e.g. unusually late configured hours), which is exactly what a
-          // real cinema would do rather than leave the room dark for an hour.
-          // The pull is floored to the :15 grid so the closed gap lands back in
-          // [buffer, buffer+14] like every normally-packed one; a kids show in
-          // the pulled suffix never goes below its earliest-allowed start.
-          for (let i = 1; i < chain.length; i++) {
-            const gap = starts[i] - (starts[i - 1] + chain[i - 1].movie.kesto);
-            if (gap <= gapSama + 14) continue;
-            let pull = floor15(gap - gapSama);
-            for (let j = i; j < chain.length; j++) {
-              if (chain[j].movie.lastenelokuva) {
-                pull = Math.min(pull, starts[j] - round15(kidsEarliest));
-              }
-            }
-            if (pull <= 0) continue;
-            for (let j = i; j < chain.length; j++) starts[j] -= pull;
+        // Tight packing: if the kids' end-time clamp opened a gap beyond the
+        // buffer plus rounding, pull everything after it earlier - a room
+        // never sits idle longer than cleanup + rounding.
+        for (let i = 1; i < chain.length; i++) {
+          const gap = starts[i] - (starts[i - 1] + chain[i - 1].movie.kesto);
+          if (gap <= gapSama + 14) continue;
+          let pull = floor15(gap - gapSama);
+          for (let j = i; j < chain.length; j++) {
+            if (chain[j].movie.lastenelokuva) pull = Math.min(pull, starts[j] - round15(kidsEarliest));
           }
+          if (pull <= 0) continue;
+          for (let j = i; j < chain.length; j++) starts[j] -= pull;
+        }
 
-          // Cross-theater spacing: no show starts within gapEri (at least
-          // MIN_ERI_SALI) of another room's start. Walking the chain from the
-          // evening backwards, a colliding show moves 15 min earlier together
-          // with everything before it, so the gaps in front of it stay intact
-          // and only the one after it widens - the room's later shows, and its
-          // evening anchor, stay where they are.
-          const eri = Math.max(gapEri ?? 0, MIN_ERI_SALI);
-          const collides = st => placedToday.some(p => Math.abs(p - st) < eri);
+        // Cross-theater spacing: walking the chain from the evening backwards,
+        // a show starting within gapEri of another room's start moves 15 min
+        // earlier together with everything before it. A chain already
+        // starting at the day's earliest allowed time can't go earlier; then
+        // the show moves later instead, with everything after it.
+        // Moving a show later carries the shows after it along, which can
+        // land one of them on another room's start - so the pass repeats
+        // until the room's day is clean.
+        const collides = st => placedToday.some(p => Math.abs(p - st) < gapEri);
+        for (let pass = 0; pass < 6 && starts.some(collides); pass++) {
           for (let i = chain.length - 1; i >= 0; i--) {
-            let guard = 8;
-            while (guard-- > 0 && collides(starts[i]) && starts[0] - 15 >= floorMin) {
+            for (let guard = 0; guard < 8 && collides(starts[i]) && starts[0] - 15 >= floorMin; guard++) {
               for (let j = 0; j <= i; j++) starts[j] -= 15;
             }
-          }
-
-          chain.forEach((s, i) => {
-            placedToday.push(starts[i]);
-            entries.push({ sali, start: starts[i], s });
-          });
-        });
-
-        return entries;
-      };
-
-      let entries = buildDay(showings);
-
-      // ── Opening-time target: top the day up until it opens early enough ──
-      // Reference weekdays open around 16:00 and Saturday at 13:30 (median
-      // first-show start over 27 weeks) almost regardless of roster size -
-      // a light week just spreads its titles across more days. If this day's
-      // emergent opening lands later than the target, try adding shows one
-      // at a time - each the best-ranked movie NOT yet playing today (that's
-      // how the reference lengthens a day; only 1.9% of its movie-days are
-      // same-day repeats, and those are nearly all the #1 title, the
-      // fallback here) - and keep whichever length opened CLOSEST to the
-      // target (ties to the shorter day). A single extra show often lands in
-      // a room whose chain isn't the day's earliest and moves nothing, so
-      // the search always walks a few steps ahead rather than stopping at
-      // the first unhelpful add. Explicit naytosTavoitteet totals are hard
-      // caps and never topped up.
-      const targetStr = (settings.avautuu_tavoite ?? {})[paiva] ?? OPEN_TARGET[paiva];
-      if (targetStr) {
-        const target = toMin(targetStr);
-        const firstOf = es => Math.min(...es.map(e => e.start));
-        const pickExtra = (cur) => {
-          const today = new Set(cur.map(s => s.movie.id));
-          let extra = null;
-          selectedMovies.some((movie, rankIndex) => {
-            if (naytosTavoitteet[movie.id] != null) return false;
-            if (movie.lastenelokuva && !settings.lastenelokuva.paivat.includes(paiva)) return false;
-            if (today.has(movie.id)) return false;
-            extra = { movie, rankIndex };
-            return true;
-          });
-          if (extra) return extra;
-          // Whole roster already plays today - repeat the least-shown top
-          // title, the only same-day repeat the reference runs.
-          const perMovie = new Map();
-          cur.forEach(s => perMovie.set(s.movie.id, (perMovie.get(s.movie.id) ?? 0) + 1));
-          selectedMovies.slice(0, TOP_RANK_COUNT).forEach((movie, rankIndex) => {
-            if (naytosTavoitteet[movie.id] != null) return;
-            if (movie.lastenelokuva && !settings.lastenelokuva.paivat.includes(paiva)) return;
-            if (!extra || (perMovie.get(movie.id) ?? 0) < (perMovie.get(extra.movie.id) ?? 0)) {
-              extra = { movie, rankIndex };
+            for (let guard = 0; guard < 8 && collides(starts[i]); guard++) {
+              for (let j = i; j < chain.length; j++) starts[j] += 15;
             }
-          });
-          return extra;
-        };
-        let best = { dist: Math.abs(firstOf(entries) - target), showings, entries };
-        let cur = { showings, entries };
-        for (let step = 0; step < 5 && firstOf(cur.entries) > target + 15; step++) {
-          const extra = pickExtra(cur.showings);
-          if (!extra) break;
-          const trialShowings = [...cur.showings, extra];
-          const trialEntries = buildDay(trialShowings);
-          cur = { showings: trialShowings, entries: trialEntries };
-          const dist = Math.abs(firstOf(trialEntries) - target);
-          if (dist < best.dist) best = { dist, ...cur };
+          }
         }
-        ({ showings, entries } = best);
-      }
 
-      entries.forEach(({ sali, start, s }) => {
-        naytokset.push({
-          id: Date.now().toString(36) + Math.random().toString(36).slice(2),
-          sali,
-          paiva,
-          alkaa: toHHMM(start),
-          loppuu: toHHMM(start + s.movie.kesto),
-          elokuvaId: s.movie.id,
-          nimi: s.movie.nimi,
-          kesto: s.movie.kesto,
-          ikäraja: s.movie.ikäraja,
-          hinta: s.movie.hinta,
-          jakelija: s.movie.jakelija,
-          lastenelokuva: !!s.movie.lastenelokuva,
+        const crowded = chain.filter((x, i) => collides(starts[i]));
+        if (crowded.length) warnings.push(`${paiva} ${sali}: ${crowded.map(x => x.movie.nimi).join(', ')} alkaa alle ${gapEri} min päässä toisen salin näytöksestä - päivä on liian täynnä.`);
+
+        const lastEnd = starts[starts.length - 1] + last.movie.kesto;
+        if (lastEnd > 24 * 60) warnings.push(`${paiva} ${sali}: ${chain.length} näytöstä ei mahdu ennen puoltayötä (viimeinen päättyy ${toHHMM(lastEnd % (24 * 60))}).`);
+
+        chain.forEach((x, i) => {
+          placedToday.push(starts[i]);
+          naytokset.push({
+            id: Date.now().toString(36) + Math.random().toString(36).slice(2),
+            sali,
+            paiva,
+            alkaa: toHHMM(starts[i]),
+            loppuu: toHHMM(starts[i] + x.movie.kesto),
+            elokuvaId: x.movie.id,
+            nimi: x.movie.nimi,
+            kesto: x.movie.kesto,
+            ikäraja: x.movie.ikäraja,
+            hinta: x.movie.hinta,
+            jakelija: x.movie.jakelija,
+            lastenelokuva: !!x.movie.lastenelokuva,
+          });
         });
       });
     });
 
-    return naytokset;
+    return { naytokset, warnings };
   }
 
   // Validate a single screening against constraints (used while/after dragging
@@ -679,5 +295,5 @@ const Scheduler = (() => {
     return warnings;
   }
 
-  return { schedule, validateScreening, toMin, toHHMM, round15, getPaivat, addDays, weekdayOf, isoToFin, PAIVA_LYHYET, SALAT };
+  return { populate, validateScreening, toMin, toHHMM, round15, getPaivat, addDays, weekdayOf, isoToFin, PAIVA_LYHYET, SALAT };
 })();

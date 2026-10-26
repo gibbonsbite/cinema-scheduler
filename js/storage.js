@@ -9,16 +9,15 @@ const Storage = (() => {
 
   const DEFAULTS = {
     settings: {
-      // The scheduler builds each day BACKWARDS from the evening, so these
-      // two fields mean: sulkeutuu = the evening anchor (when that day's
-      // LAST show starts - the median last showtime per weekday across 32
-      // weeks of reference schedules), avautuu = the absolute earliest a
-      // show may ever start (a wide safety floor, not a real opening time).
-      // The actual opening time is never configured or hardcoded - it
-      // emerges from how many shows the day runs (weekdays open later
-      // simply because they run fewer shows), exactly like the reference
-      // schedules, whose first showtime swings by hours week to week while
-      // the last showtime stays put. js/export.js derives each week's real
+      // "Täytä ohjelma" (Scheduler.populate) builds each room's day BACKWARDS
+      // from the evening, so these two fields mean: sulkeutuu = the evening
+      // anchor (when that day's LAST show starts - the median last showtime
+      // per weekday across 32 weeks of reference schedules), avautuu = the
+      // absolute earliest a show may ever start (a wide safety floor, not a
+      // real opening time). The actual opening time is never configured - it
+      // emerges from how many shows the room runs, exactly like the
+      // reference schedules, whose first showtime swings by hours week to
+      // week while the last showtime stays put. js/export.js derives each week's real
       // effective hours from the placed showings. Individual days can still
       // be pinned manually - see aukioloajat_yliajot below.
       aukioloajat: {
@@ -30,38 +29,6 @@ const Storage = (() => {
         KE: { avautuu: '09:00', sulkeutuu: '19:15' },
         TO: { avautuu: '09:00', sulkeutuu: '19:15' },
       },
-      // How heavily each weekday is programmed relative to the others. The
-      // scheduler fills days in proportion to these, so a bigger number
-      // means more shows land on that day. Defaults are the average per-day
-      // counts of regular shows across the 32 reference weeks (Saturday the
-      // peak at 9.2, Monday the lightest at 4.6); the absolute scale doesn't
-      // matter, only the ratios do. Special events - private screenings,
-      // opera, the film club, KE-KINO - are left out: the scheduler never
-      // generates those, and counting them had inflated Wednesday to 7.0.
-      paivapainot: {
-        PE: 6.3, LA: 9.2, SU: 6.6, MA: 4.6, TI: 5.6, KE: 5.9, TO: 5.8,
-      },
-      // When each weekday's FIRST show should start, at the latest - the
-      // median first-show start per weekday across the 32 reference weeks
-      // (regular shows only, like paivapainot).
-      // The scheduler's backwards-packed chains usually open this early on
-      // their own; if a light program would open a day later than this, the
-      // day is topped up with extra shows until its opening lands as close
-      // to the target as possible. Set a day earlier to force it longer.
-      avautuu_tavoite: {
-        PE: '16:30', LA: '13:30', SU: '14:00', MA: '16:00', TI: '16:15', KE: '16:00', TO: '16:15',
-      },
-      // Roughly how many shows a full 7-day week should run in total
-      // (reference weeks run 38-61, median 46). Spare capacity under this
-      // number is handed to the tail of a small roster as extra shows; a
-      // big roster's rank tiers already exceed it and ignore it.
-      naytoksia_viikossa: 45,
-      // Every room must run at least this many shows every day the cinema
-      // is open (a business rule: no theater sits nearly dark). The
-      // scheduler reaches the floor by MOVING shows from the most loaded
-      // days, so weekly totals stay put; if the selected roster is too
-      // small to cover it, the floor is best-effort.
-      min_naytoksia_salissa: 2,
       // 30 min cleanup buffer between consecutive shows in the same room -
       // reference same-theater gaps are 30-45 min (median 33), which is
       // exactly this buffer plus rounding to the quarter-hour grid.
@@ -92,14 +59,6 @@ const Storage = (() => {
         hintaraja: 12.5,
       },
     },
-  };
-
-  // The defaults before they were recalibrated on regular shows only (see
-  // paivapainot above) - getSettings uses them to tell a value the user
-  // actually changed from one that was merely saved along.
-  const OLD_DEFAULTS = {
-    paivapainot: { PE: 6.4, LA: 9.2, SU: 6.6, MA: 5.3, TI: 6.0, KE: 7.0, TO: 6.4 },
-    avautuu_tavoite: { PE: '16:30', LA: '13:30', SU: '14:00', MA: '16:00', TI: '16:00', KE: '15:45', TO: '16:15' },
   };
 
   // Titles are ALL CAPS on a programme sheet - every reference schedule and
@@ -238,15 +197,6 @@ const Storage = (() => {
       Object.entries(merged.aukioloajat_yliajot).forEach(([p, h]) => {
         merged.aukioloajat[p] = h;
       });
-      // Saving Asetukset writes every day's weight and target, edited or not,
-      // so a saved value still equal to the previous release's default is
-      // one the user never chose - it follows the recalibrated default.
-      const keepEdited = (savedMap, oldDefaults) => Object.fromEntries(
-        Object.entries(savedMap).filter(([p, v]) => v !== oldDefaults[p]));
-      if (saved.paivapainot) merged.paivapainot = Object.assign(merged.paivapainot, keepEdited(saved.paivapainot, OLD_DEFAULTS.paivapainot));
-      if (saved.avautuu_tavoite) merged.avautuu_tavoite = Object.assign(merged.avautuu_tavoite, keepEdited(saved.avautuu_tavoite, OLD_DEFAULTS.avautuu_tavoite));
-      if (saved.naytoksia_viikossa != null) merged.naytoksia_viikossa = saved.naytoksia_viikossa;
-      if (saved.min_naytoksia_salissa != null) merged.min_naytoksia_salissa = saved.min_naytoksia_salissa;
       if (saved.minimivali_sama_sali != null) merged.minimivali_sama_sali = saved.minimivali_sama_sali;
       if (saved.minimivali_eri_sali != null) merged.minimivali_eri_sali = saved.minimivali_eri_sali;
       if (saved.aikataulu_suunta) merged.aikataulu_suunta = saved.aikataulu_suunta;
@@ -263,7 +213,10 @@ const Storage = (() => {
       // ("30", from a hand-edited backup or an old build) would concatenate
       // instead - "1000" + "30" - and make every slot look taken. Anything
       // that isn't a usable number falls back to the default.
-      for (const key of ['naytoksia_viikossa', 'min_naytoksia_salissa', 'minimivali_sama_sali', 'minimivali_eri_sali']) {
+      // (The generator's weekly targets and day weights - naytoksia_viikossa,
+      // min_naytoksia_salissa, paivapainot, avautuu_tavoite - are gone with
+      // the generator; values still in old saved settings are simply not read.)
+      for (const key of ['minimivali_sama_sali', 'minimivali_eri_sali']) {
         const value = typeof merged[key] === 'string' && merged[key].trim() !== '' ? Number(merged[key]) : merged[key];
         merged[key] = typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : DEFAULTS.settings[key];
       }

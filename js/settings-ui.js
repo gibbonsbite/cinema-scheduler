@@ -34,16 +34,12 @@ const SettingsUI = (() => {
     PAIVAT.forEach(p => {
       const h = settings.aukioloajat[p];
       const manual = !!settings.aukioloajat_yliajot?.[p];
-      const paino = settings.paivapainot?.[p] ?? '';
-      const tavoite = settings.avautuu_tavoite?.[p] ?? '';
       const tr = document.createElement('tr');
       tr.innerHTML = `
         <td>${PAIVA_NIMET[p]}</td>
         <td><input type="checkbox" class="hours-manual" data-paiva="${p}" ${manual ? 'checked' : ''}></td>
         <td><input type="time" data-paiva="${p}" data-field="avautuu" value="${h.avautuu}" ${manual ? '' : 'disabled'}></td>
-        <td><input type="time" class="tavoite-input" data-paiva="${p}" value="${tavoite}"></td>
         <td><input type="time" data-paiva="${p}" data-field="sulkeutuu" value="${h.sulkeutuu}" ${manual ? '' : 'disabled'}></td>
-        <td><input type="number" class="paino-input" data-paiva="${p}" min="0" step="0.1" value="${paino}"></td>
       `;
       tbody.appendChild(tr);
     });
@@ -57,8 +53,6 @@ const SettingsUI = (() => {
     // Gap inputs
     document.getElementById('gap-sama').value = settings.minimivali_sama_sali;
     document.getElementById('gap-eri').value = settings.minimivali_eri_sali;
-    document.getElementById('min-per-sali').value = settings.min_naytoksia_salissa ?? 2;
-    document.getElementById('viikko-naytokset').value = settings.naytoksia_viikossa ?? 45;
 
     // Excel opening times
     document.getElementById('aukiolo-ennen').value = settings.aukiolo_excel?.avautuu_ennen_min ?? 30;
@@ -75,11 +69,9 @@ const SettingsUI = (() => {
     const container = document.getElementById('kat-rules-container');
     container.innerHTML = '';
 
+    // (Which days a kids' film plays is chosen per movie on the Suunnittelu
+    // page now, so the old "Esitetään päivinä" list is gone.)
     const lasten = settings.lastenelokuva;
-    const dayChecks = PAIVAT.map(p => {
-      const checked = lasten.paivat.includes(p) ? 'checked' : '';
-      return `<label><input type="checkbox" class="lasten-paiva" data-paiva="${p}" ${checked}> ${p}</label>`;
-    }).join('');
 
     const section = document.createElement('div');
     section.innerHTML = `
@@ -90,8 +82,6 @@ const SettingsUI = (() => {
         <input type="time" id="lasten-viimeistaan" value="${lasten.viimeistaan}">
         <label for="lasten-hintaraja">Hinta (auto-tunnistus)</label>
         <input type="number" id="lasten-hintaraja" min="0" step="0.5" value="${lasten.hintaraja ?? 12.5}">
-        <div class="set-sub">Esitetään päivinä</div>
-        <div class="day-checkboxes">${dayChecks}</div>
       </div>
     `;
     container.appendChild(section);
@@ -121,32 +111,12 @@ const SettingsUI = (() => {
     const eri  = parseInt(document.getElementById('gap-eri').value, 10);
     if (!isNaN(sama) && sama >= 0) settings.minimivali_sama_sali = sama;
     if (!isNaN(eri)  && eri  >= 0) settings.minimivali_eri_sali  = eri;
-    const minSali = parseInt(document.getElementById('min-per-sali').value, 10);
-    if (!isNaN(minSali) && minSali >= 0) settings.min_naytoksia_salissa = minSali;
-    const viikko = parseInt(document.getElementById('viikko-naytokset').value, 10);
-    if (!isNaN(viikko) && viikko >= 1) settings.naytoksia_viikossa = viikko;
-
-    // Day weights and opening-time targets
-    if (!settings.paivapainot) settings.paivapainot = {};
-    document.querySelectorAll('.paino-input').forEach(inp => {
-      const val = parseFloat(inp.value);
-      if (!isNaN(val) && val > 0) settings.paivapainot[inp.dataset.paiva] = val;
-    });
-    if (!settings.avautuu_tavoite) settings.avautuu_tavoite = {};
-    document.querySelectorAll('.tavoite-input').forEach(inp => {
-      if (inp.value) settings.avautuu_tavoite[inp.dataset.paiva] = inp.value;
-    });
 
     // Lastenelokuva time window
     const lastenAik = document.getElementById('lasten-aikaisintaan').value;
     const lastenVii = document.getElementById('lasten-viimeistaan').value;
     if (lastenAik) settings.lastenelokuva.aikaisintaan = lastenAik;
     if (lastenVii) settings.lastenelokuva.viimeistaan = lastenVii;
-    const lastenPaivat = [];
-    document.querySelectorAll('.lasten-paiva').forEach(cb => {
-      if (cb.checked) lastenPaivat.push(cb.dataset.paiva);
-    });
-    if (lastenPaivat.length > 0) settings.lastenelokuva.paivat = lastenPaivat;
     const hintaraja = parseFloat(document.getElementById('lasten-hintaraja').value);
     if (!isNaN(hintaraja) && hintaraja >= 0) settings.lastenelokuva.hintaraja = hintaraja;
 
