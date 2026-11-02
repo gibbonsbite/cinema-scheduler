@@ -551,10 +551,15 @@ const ScheduleUI = (() => {
     // to the library only with the user's explicit permission - declining
     // cancels the whole import rather than importing a partial schedule.
     const movieByNimi = new Map(Library.getAll().map(m => [normalizeNimi(m.nimi), m]));
+    // A new movie's library price is the highest price it has in the file -
+    // its regular price, the lower ones being discounted days. The shows
+    // themselves keep the prices the file gives them.
     const unknown = new Map(); // normalized name -> first screening carrying its data
+    const topPrice = new Map(); // normalized name -> highest price in the file
     screenings.forEach(s => {
       const key = normalizeNimi(s.nimi);
       if (!movieByNimi.has(key) && !unknown.has(key)) unknown.set(key, s);
+      if (s.hinta != null && !(topPrice.get(key) >= s.hinta)) topPrice.set(key, s.hinta);
     });
 
     if (unknown.size > 0) {
@@ -566,15 +571,18 @@ const ScheduleUI = (() => {
       if (!ok) return;
 
       const hintaraja = Storage.getSettings().lastenelokuva?.hintaraja ?? 12.5;
-      const newMovies = [...unknown.values()].map(s => ({
-        id: Date.now().toString(36) + Math.random().toString(36).slice(2),
-        nimi: s.nimi,
-        kesto: s.kesto,
-        ikäraja: s.ikäraja,
-        hinta: s.hinta ?? 0,
-        jakelija: s.jakelija,
-        lastenelokuva: s.hinta != null && Math.abs(s.hinta - hintaraja) < 0.01,
-      }));
+      const newMovies = [...unknown.entries()].map(([key, s]) => {
+        const hinta = topPrice.get(key);
+        return {
+          id: Date.now().toString(36) + Math.random().toString(36).slice(2),
+          nimi: s.nimi,
+          kesto: s.kesto,
+          ikäraja: s.ikäraja,
+          hinta: hinta ?? 0,
+          jakelija: s.jakelija,
+          lastenelokuva: hinta != null && Math.abs(hinta - hintaraja) < 0.01,
+        };
+      });
       Storage.saveMovies([...Storage.getMovies(), ...newMovies]);
       Library.refresh();
       newMovies.forEach(m => movieByNimi.set(normalizeNimi(m.nimi), m));

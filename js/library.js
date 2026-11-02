@@ -14,7 +14,9 @@ const Library = (() => {
   function validateMovieFields(nimi, kesto, hinta) {
     if (!nimi) return { valid: false, error: 'Nimi on pakollinen.' };
     if (!kesto || kesto < 1 || kesto > 600) return { valid: false, error: 'Kesto pitää olla 1–600 minuuttia.' };
-    if (isNaN(hinta) || hinta < 0) return { valid: false, error: 'Tarkista hinta.' };
+    // A schedule row with no price at all (club nights, intermissions,
+    // "laskutus" private shows) arrives as null, which isNaN lets through.
+    if (hinta == null || isNaN(hinta) || hinta < 0) return { valid: false, error: 'Tarkista hinta.' };
     return { valid: true, error: null };
   }
 
@@ -203,6 +205,10 @@ const Library = (() => {
   // importing a schedule export rather than a clean movie list) - fold repeats
   // into one candidate, keeping the first non-blank distributor and flagging
   // any disagreement between rows so the preview can surface it as a warning.
+  // Rows of the same movie fold into one. The highest price on any row is
+  // taken as its regular price: a schedule lists discounted days (a cheap
+  // Tuesday, say) next to normal ones, and the normal price is the top one.
+  // A price difference is therefore expected and isn't flagged.
   function foldByName(rawRows) {
     const byName = new Map();
     rawRows.forEach(r => {
@@ -215,8 +221,8 @@ const Library = (() => {
         e.occurrences++;
         if (!e.jakelija && r.jakelija) e.jakelija = r.jakelija;
         if (r.lastenelokuva) e.lastenelokuva = true;
+        if (r.hinta != null && (e.hinta == null || r.hinta > e.hinta)) e.hinta = r.hinta;
         if ((r.kesto != null && r.kesto !== e.kesto) ||
-            (r.hinta != null && r.hinta !== e.hinta) ||
             (r.ikäraja && r.ikäraja !== e.ikäraja)) {
           e.inconsistent = true;
         }
@@ -312,13 +318,15 @@ const Library = (() => {
         ikäraja,
         hinta,
         jakelija: jakelijaCell != null ? String(jakelijaCell).trim() : '',
-        lastenelokuva: isChildPriced(hinta), // not otherwise recoverable from a schedule export
       });
     });
 
+    // The kids' flag isn't otherwise recoverable from a schedule export, so it
+    // comes from the regular (highest) price - a discounted day that happens to
+    // land on the kids' price doesn't make a film a kids' film.
     const candidates = foldByName(raw).map(c => {
       const { valid, error } = validateMovieFields(c.nimi, c.kesto, c.hinta);
-      return { ...c, invalid: !valid, invalidReason: error };
+      return { ...c, lastenelokuva: isChildPriced(c.hinta), invalid: !valid, invalidReason: error };
     });
     return { candidates, warnings };
   }
