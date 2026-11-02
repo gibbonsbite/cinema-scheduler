@@ -22,7 +22,6 @@
 <!-- ── Tab bar ─────────────────────────────────────────────────────────── -->
 <nav id="tab-bar">
   <button class="tab-btn active" data-tab="kirjasto">Kirjasto</button>
-  <button class="tab-btn" data-tab="suunnittelu">Suunnittelu</button>
   <button class="tab-btn" data-tab="ohjelmointi">Ohjelmointi</button>
   <button class="tab-btn" data-tab="asetukset">Asetukset</button>
 </nav>
@@ -59,23 +58,7 @@
 </section>
 
 <!-- ══════════════════════════════════════════════════════════════════════ -->
-<!-- TAB 2: SUUNNITTELU - which theaters and days each movie plays          -->
-<!-- ══════════════════════════════════════════════════════════════════════ -->
-<section id="suunnittelu-panel" class="tab-panel">
-  <div class="suunnittelu-bar">
-    <div>
-      <h2 class="settings-heading">Suunnittelu</h2>
-      <div class="suunnittelu-meta"><span id="suunnittelu-viikko"></span> · <span id="suunnittelu-yhteensa"></span></div>
-    </div>
-    <button class="btn btn-secondary" id="btn-suunnittelu-lisaa">+ Lisää elokuvia</button>
-    <button class="btn btn-primary" id="btn-tayta-ohjelma">⚙️ Täytä ohjelma</button>
-  </div>
-  <p class="card-hint suunnittelu-ohje">Raahaa elokuvat vasemmalta saleihin. Mitä ylempänä elokuva on salissa, sitä tärkeämpi se on: ylin saa illan paikan ja eniten päiviä. Päiviä voi muuttaa kortin painikkeista (&ldquo;auto&rdquo; valitsee ne sijan mukaan, &#x21BA; palauttaa automaattiset). Saman elokuvan voi laittaa useaan saliin. Raahaa kortti takaisin vasemmalle poistaaksesi sen salista. &ldquo;Täytä ohjelma&rdquo; laskee kellonajat ja avaa ohjelman Ohjelmointi-sivulle muokattavaksi.</p>
-  <div class="suunnittelu-alue" id="suunnittelu-sisalto"></div>
-</section>
-
-<!-- ══════════════════════════════════════════════════════════════════════ -->
-<!-- TAB 3: OHJELMOINTI                                                     -->
+<!-- TAB 2: OHJELMOINTI                                                     -->
 <!-- ══════════════════════════════════════════════════════════════════════ -->
 <section id="ohjelmointi-panel" class="tab-panel">
 
@@ -133,7 +116,7 @@
 </section>
 
 <!-- ══════════════════════════════════════════════════════════════════════ -->
-<!-- TAB 4: ASETUKSET                                                       -->
+<!-- TAB 3: ASETUKSET                                                       -->
 <!-- ══════════════════════════════════════════════════════════════════════ -->
 <section id="asetukset-panel" class="tab-panel">
   <div class="settings-page">
@@ -147,19 +130,7 @@
 
     <div class="settings-layout">
 
-      <h3 class="settings-group-title sg-auto">Automaattinen ohjelmointi</h3>
-
-      <!-- Operating hours -->
-      <div class="card sc-hours">
-        <div class="card-title">Aukioloajat</div>
-        <p class="card-hint">&ldquo;Täytä ohjelma&rdquo; rakentaa kunkin salin päivän illasta taaksepäin: viimeinen näytös alkaa &ldquo;viimeinen näytös alkaa&rdquo; -aikaan ja muut sen edelle. Aikaisin aloitus on turvaraja, jota aiemmin mikään näytös ei ala.</p>
-        <div class="hours-table-wrap">
-          <table class="hours-table">
-            <thead><tr><th>Päivä</th><th>Manuaalinen</th><th>Aikaisin aloitus</th><th>Viimeinen näytös alkaa</th></tr></thead>
-            <tbody id="hours-tbody"></tbody>
-          </table>
-        </div>
-      </div>
+      <h3 class="settings-group-title sg-auto">Ohjelmointi</h3>
 
       <!-- Show counts and gaps -->
       <div class="card sc-counts">
@@ -175,14 +146,18 @@
             <option value="1">1 min</option><option value="5">5 min</option><option value="10">10 min</option>
             <option value="15">15 min</option><option value="30">30 min</option>
           </select>
-          <p class="set-hint">Askel, johon näytökset asettuvat raahattaessa ja siirrettäessä. &ldquo;Täytä ohjelma&rdquo; käyttää aina vartteja.</p>
+          <p class="set-hint">Askel, johon näytökset asettuvat raahattaessa ja siirrettäessä.</p>
         </div>
       </div>
 
-      <!-- Kids' movie window -->
+      <!-- Kids' movies -->
       <div class="card sc-kids">
-        <div class="card-title">Lastenelokuvan aikaikkuna</div>
-        <div id="kat-rules-container"></div>
+        <div class="card-title">Lastenelokuvat</div>
+        <div class="set-fields">
+          <label for="lasten-hintaraja">Lipun hinta, josta tunnistetaan (€)</label>
+          <input type="number" id="lasten-hintaraja" min="0" step="0.5">
+          <p class="set-hint">Kirjastoon lisättävä tai Excelistä tuotava elokuva tällä hinnalla merkitään lastenelokuvaksi (👶).</p>
+        </div>
       </div>
 
       <h3 class="settings-group-title sg-excel">Excel-vienti</h3>
@@ -405,7 +380,6 @@
       btn.classList.add('active');
       document.getElementById(tab + '-panel').classList.add('active');
       if (tab === 'ohjelmointi') { ScheduleUI.buildWeekPanel(); ScheduleUI.renderGrid(); }
-      if (tab === 'suunnittelu') ScheduleUI.buildPlanPage();
       if (tab === 'asetukset') SettingsUI.render();
     });
   });

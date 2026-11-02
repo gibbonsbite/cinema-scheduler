@@ -1,8 +1,6 @@
 'use strict';
 
 const SettingsUI = (() => {
-  const PAIVAT = ['PE', 'LA', 'SU', 'MA', 'TI', 'KE', 'TO'];
-  const PAIVA_NIMET = { PE:'Perjantai', LA:'Lauantai', SU:'Sunnuntai', MA:'Maanantai', TI:'Tiistai', KE:'Keskiviikko', TO:'Torstai' };
 
   const COL_NIMET = {
     A: 'Sali',
@@ -26,30 +24,6 @@ const SettingsUI = (() => {
         <input type="number" class="col-width-input" data-col="${col}" min="1" max="100"
                value="${settings.sarakeleveydet?.[col] ?? 8}"></label>`).join('');
 
-    // Operating hours - unchecked days show (and use) the built-in default and
-    // are disabled; checking "manuaalinen" pins that day to whatever's in the
-    // time inputs when settings are saved.
-    const tbody = document.getElementById('hours-tbody');
-    tbody.innerHTML = '';
-    PAIVAT.forEach(p => {
-      const h = settings.aukioloajat[p];
-      const manual = !!settings.aukioloajat_yliajot?.[p];
-      const tr = document.createElement('tr');
-      tr.innerHTML = `
-        <td>${PAIVA_NIMET[p]}</td>
-        <td><input type="checkbox" class="hours-manual" data-paiva="${p}" ${manual ? 'checked' : ''}></td>
-        <td><input type="time" data-paiva="${p}" data-field="avautuu" value="${h.avautuu}" ${manual ? '' : 'disabled'}></td>
-        <td><input type="time" data-paiva="${p}" data-field="sulkeutuu" value="${h.sulkeutuu}" ${manual ? '' : 'disabled'}></td>
-      `;
-      tbody.appendChild(tr);
-    });
-    tbody.querySelectorAll('.hours-manual').forEach(cb => {
-      cb.addEventListener('change', () => {
-        const row = cb.closest('tr');
-        row.querySelectorAll('input[data-field]').forEach(inp => { inp.disabled = !cb.checked; });
-      });
-    });
-
     // Gap inputs
     document.getElementById('gap-sama').value = settings.minimivali_sama_sali;
     document.getElementById('gap-eri').value = settings.minimivali_eri_sali;
@@ -59,53 +33,15 @@ const SettingsUI = (() => {
     document.getElementById('aukiolo-ennen').value = settings.aukiolo_excel?.avautuu_ennen_min ?? 30;
     document.getElementById('aukiolo-sulku').value = settings.aukiolo_excel?.sulkeutuu_offset_min ?? 0;
 
-    // Lastenelokuva time window
-    renderLastenRules(settings);
+    // Kids' movies: the price that marks a movie as one
+    document.getElementById('lasten-hintaraja').value = settings.lastenelokuva?.hintaraja ?? 12.5;
 
     // The form now shows exactly what is stored.
     setDirty(false);
   }
 
-  function renderLastenRules(settings) {
-    const container = document.getElementById('kat-rules-container');
-    container.innerHTML = '';
-
-    // (Which days a kids' film plays is chosen per movie on the Suunnittelu
-    // page now, so the old "Esitetään päivinä" list is gone.)
-    const lasten = settings.lastenelokuva;
-
-    const section = document.createElement('div');
-    section.innerHTML = `
-      <div class="set-fields">
-        <label for="lasten-aikaisintaan">Aikaisintaan</label>
-        <input type="time" id="lasten-aikaisintaan" value="${lasten.aikaisintaan}">
-        <label for="lasten-viimeistaan">Viimeistään</label>
-        <input type="time" id="lasten-viimeistaan" value="${lasten.viimeistaan}">
-        <label for="lasten-hintaraja">Hinta (auto-tunnistus)</label>
-        <input type="number" id="lasten-hintaraja" min="0" step="0.5" value="${lasten.hintaraja ?? 12.5}">
-      </div>
-    `;
-    container.appendChild(section);
-  }
-
   function save() {
     const settings = Storage.getSettings();
-
-    // Hours - only days with "manuaalinen" checked get persisted as an override;
-    // unchecked days are dropped from the override map so they keep tracking
-    // whatever the app's built-in default is.
-    if (!settings.aukioloajat_yliajot) settings.aukioloajat_yliajot = {};
-    document.querySelectorAll('#hours-tbody tr').forEach(row => {
-      const p = row.querySelector('.hours-manual').dataset.paiva;
-      const manual = row.querySelector('.hours-manual').checked;
-      if (manual) {
-        const avautuu = row.querySelector('[data-field="avautuu"]').value;
-        const sulkeutuu = row.querySelector('[data-field="sulkeutuu"]').value;
-        settings.aukioloajat_yliajot[p] = { avautuu, sulkeutuu };
-      } else {
-        delete settings.aukioloajat_yliajot[p];
-      }
-    });
 
     // Gaps
     const sama = parseInt(document.getElementById('gap-sama').value, 10);
@@ -115,11 +51,7 @@ const SettingsUI = (() => {
     const tarkkuus = parseInt(document.getElementById('raahaus-tarkkuus').value, 10);
     if ([1, 5, 10, 15, 30].includes(tarkkuus)) settings.raahaus_tarkkuus = tarkkuus;
 
-    // Lastenelokuva time window
-    const lastenAik = document.getElementById('lasten-aikaisintaan').value;
-    const lastenVii = document.getElementById('lasten-viimeistaan').value;
-    if (lastenAik) settings.lastenelokuva.aikaisintaan = lastenAik;
-    if (lastenVii) settings.lastenelokuva.viimeistaan = lastenVii;
+    // Kids' movies
     const hintaraja = parseFloat(document.getElementById('lasten-hintaraja').value);
     if (!isNaN(hintaraja) && hintaraja >= 0) settings.lastenelokuva.hintaraja = hintaraja;
 

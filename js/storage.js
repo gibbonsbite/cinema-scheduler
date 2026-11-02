@@ -9,34 +9,11 @@ const Storage = (() => {
 
   const DEFAULTS = {
     settings: {
-      // "Täytä ohjelma" (Scheduler.populate) builds each room's day BACKWARDS
-      // from the evening, so these two fields mean: sulkeutuu = the evening
-      // anchor (when that day's LAST show starts - the median last showtime
-      // per weekday across 32 weeks of reference schedules), avautuu = the
-      // absolute earliest a show may ever start (a wide safety floor, not a
-      // real opening time). The actual opening time is never configured - it
-      // emerges from how many shows the room runs, exactly like the
-      // reference schedules, whose first showtime swings by hours week to
-      // week while the last showtime stays put. js/export.js derives each week's real
-      // effective hours from the placed showings. Individual days can still
-      // be pinned manually - see aukioloajat_yliajot below.
-      aukioloajat: {
-        PE: { avautuu: '09:00', sulkeutuu: '20:00' },
-        LA: { avautuu: '09:00', sulkeutuu: '19:45' },
-        SU: { avautuu: '09:00', sulkeutuu: '17:45' },
-        MA: { avautuu: '09:00', sulkeutuu: '18:30' },
-        TI: { avautuu: '09:00', sulkeutuu: '19:15' },
-        KE: { avautuu: '09:00', sulkeutuu: '19:15' },
-        TO: { avautuu: '09:00', sulkeutuu: '19:15' },
-      },
       // 30 min cleanup buffer between consecutive shows in the same room -
       // reference same-theater gaps are 30-45 min (median 33), which is
       // exactly this buffer plus rounding to the quarter-hour grid.
       minimivali_sama_sali: 30,
-      // Minimum spacing between shows starting in DIFFERENT rooms. 0 = off:
-      // the room anchors are already staggered 30 min apart by the
-      // scheduler, so an extra cross-room constraint is unnecessary by
-      // default.
+      // Minimum spacing between shows starting in DIFFERENT rooms. 0 = off.
       minimivali_eri_sali: 0,
       // The step every manual edit snaps to (dragging, making room, gap
       // fills, moving between theaters), in minutes: 1, 5, 10, 15 or 30.
@@ -47,15 +24,6 @@ const Storage = (() => {
       sarakeleveydet: { A:11, B:3, C:5, D:38, E:5, F:5, G:8, H:5 },
       aukiolo_excel: { avautuu_ennen_min: 30, sulkeutuu_offset_min: 0 },
       lastenelokuva: {
-        aikaisintaan: '10:00',
-        // Latest allowed END for a kids' show. Reference kids screenings
-        // routinely end as late as ~19:15 (e.g. a 17:45 start + 90 min right
-        // before the evening slot), so this sits just above that - tight
-        // enough that kids' films never take the evening anchor, loose
-        // enough not to punch holes in a chain between the afternoon kids
-        // block and the evening show.
-        viimeistaan: '19:30',
-        paivat: ['PE','LA','SU','MA','TI','KE','TO'],
         // Price (EUR) at which a newly added/imported movie defaults to
         // lastenelokuva - family-film tickets are consistently priced at this
         // point in reference data while adult-oriented films cost more.
@@ -191,26 +159,13 @@ const Storage = (() => {
       // deep merge saved over defaults so new default keys always appear
       if (!saved) return JSON.parse(JSON.stringify(DEFAULTS.settings));
       const merged = JSON.parse(JSON.stringify(DEFAULTS.settings));
-      // Only days the user explicitly pinned (aukioloajat_yliajot) replace the
-      // built-in default - any day left on "auto" keeps tracking DEFAULTS, so
-      // improvements to the default hours apply immediately without requiring
-      // every user to re-save. (The old `aukioloajat` full-week key from before
-      // this override system is simply never read again.)
-      merged.aukioloajat_yliajot = saved.aukioloajat_yliajot || {};
-      Object.entries(merged.aukioloajat_yliajot).forEach(([p, h]) => {
-        merged.aukioloajat[p] = h;
-      });
+      // (Opening hours and the kids' time window fed the removed automatic
+      // filling; values still in old saved settings are simply not read.)
       if (saved.minimivali_sama_sali != null) merged.minimivali_sama_sali = saved.minimivali_sama_sali;
       if (saved.minimivali_eri_sali != null) merged.minimivali_eri_sali = saved.minimivali_eri_sali;
       if ([1, 5, 10, 15, 30].includes(Number(saved.raahaus_tarkkuus))) merged.raahaus_tarkkuus = Number(saved.raahaus_tarkkuus);
       if (saved.aikataulu_suunta) merged.aikataulu_suunta = saved.aikataulu_suunta;
-      if (saved.lastenelokuva) {
-        merged.lastenelokuva = Object.assign(merged.lastenelokuva, saved.lastenelokuva);
-      } else if (saved.kategoriasaannot?.lastenelokuva) {
-        // Migrate the pre-category-removal shape (kategoriasaannot.lastenelokuva) once.
-        const old = saved.kategoriasaannot.lastenelokuva;
-        merged.lastenelokuva = { aikaisintaan: old.aikaisintaan, viimeistaan: old.viimeistaan, paivat: old.paivat };
-      }
+      if (saved.lastenelokuva?.hintaraja != null) merged.lastenelokuva.hintaraja = saved.lastenelokuva.hintaraja;
       if (saved.sarakeleveydet) merged.sarakeleveydet = Object.assign(merged.sarakeleveydet, saved.sarakeleveydet);
       if (saved.aukiolo_excel) merged.aukiolo_excel = Object.assign(merged.aukiolo_excel, saved.aukiolo_excel);
       // The scheduler adds these to minute counts, so one stored as text

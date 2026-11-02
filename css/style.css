@@ -948,100 +948,11 @@ tr.row-duplicate td { color: #94a3b8; }
 tr.row-invalid td { background: #fef2f2; }
 .tuonti-status { font-size: 0.8em; color: #92400e; white-space: nowrap; }
 
-/* ── Suunnittelu (planning) page ───────────────────────────────── */
-.suunnittelu-bar { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
-.suunnittelu-bar > div:first-child { margin-right: auto; }
-.suunnittelu-meta { font-size: 0.85em; color: var(--text-muted); margin-top: 2px; }
-#suunnittelu-viikko { font-weight: 600; color: #2563eb; }
-.suunnittelu-ohje { max-width: 900px; margin: 0 0 12px; }
-.suunnittelu-alue { display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 16px; align-items: start; }
-.plan-bucket, .plan-room {
-  background: var(--bg-card);
-  border-radius: 6px;
-  box-shadow: 0 1px 4px var(--shadow-color);
-  padding: 10px;
-  border: 2px solid transparent;
-}
-.plan-bucket h3, .plan-room h3 {
-  font-size: 0.85em; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; color: var(--text-muted); margin: 2px 2px 8px;
-}
-.plan-bucket { position: sticky; top: 10px; }
-.plan-bucket.drop-target { border-color: #dc2626; background: rgba(220, 38, 38, 0.05); }
-.plan-bucket-list { display: flex; flex-direction: column; gap: 6px; }
-.plan-movie {
-  display: flex; flex-direction: column; gap: 3px; padding: 6px; border-radius: 5px;
-  background: var(--bg-card-alt); cursor: grab; font-size: 0.85em;
-}
-.plan-movie:hover { background: var(--bg-hover); }
-.plan-movie-meta { font-size: 0.85em; color: var(--text-muted); padding-left: 2px; }
-.plan-movie-meta b { color: #2563eb; }
-.plan-chip { display: inline-block; padding: 3px 8px; border-radius: 4px; font-weight: 700; line-height: 1.3; min-width: 0; overflow-wrap: anywhere; }
-
-.plan-rooms { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; align-items: start; }
-.plan-room header { display: flex; align-items: baseline; justify-content: space-between; }
-.plan-room[data-nro="1"] { border-top-color: var(--sali-1); }
-.plan-room[data-nro="2"] { border-top-color: var(--sali-2); }
-.plan-room[data-nro="3"] { border-top-color: var(--sali-3); }
-.plan-room[data-nro] { border-top-width: 4px; }
-.plan-movie-meta .sali-badge { font-size: 0.95em; margin-left: 2px; }
-.plan-room-sum { font-size: 0.8em; color: var(--text-muted); font-weight: 600; }
-.plan-room-list {
-  min-height: 120px; display: flex; flex-direction: column; gap: 6px;
-  border-radius: 5px; padding: 4px; margin: 0 -4px;
-}
-.plan-room-list.drop-target { background: rgba(37, 99, 235, 0.07); outline: 2px dashed rgba(37, 99, 235, 0.5); }
-.plan-room-empty { margin: auto; color: var(--text-muted); font-size: 0.85em; opacity: 0.8; }
-.plan-drop-line { height: 3px; border-radius: 2px; background: #2563eb; margin: -1px 0; flex: 0 0 auto; }
-
-.plan-card {
-  border: 1px solid var(--border-light); border-radius: 6px; padding: 6px 7px;
-  background: var(--bg-card); cursor: grab; font-size: 0.85em;
-  box-shadow: 0 1px 2px var(--shadow-color);
-}
-.plan-card.dragging, .plan-movie.dragging { opacity: 0.4; }
-.plan-card-top { display: flex; align-items: flex-start; gap: 6px; }
-.plan-card-rank { font-weight: 800; color: var(--text-muted); min-width: 1.5em; padding-top: 3px; }
-.plan-card-top .plan-chip { flex: 1 1 auto; }
-.plan-card-x { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 0.95em; padding: 2px 3px; border-radius: 3px; }
-.plan-card-x:hover { color: #dc2626; background: var(--bg-hover); }
-.plan-card-days { display: flex; flex-wrap: wrap; align-items: center; gap: 3px; margin: 6px 0 0 calc(1.5em + 6px); }
-.plan-day {
-  font: inherit; font-size: 0.82em; font-weight: 700; width: 2.4em; padding: 2px 0; border-radius: 4px; cursor: pointer;
-  border: 1px solid var(--border-color); background: var(--bg-input); color: var(--text-muted);
-}
-.plan-day.on { background: #2563eb; border-color: #2563eb; color: #fff; }
-.plan-card-n { margin-left: auto; font-weight: 800; color: var(--text-main); min-width: 1.3em; text-align: right; }
-.plan-card-auto { font-size: 0.75em; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; color: var(--text-muted); padding: 1px 4px; border: 1px solid var(--border-lighter); border-radius: 3px; }
-.plan-card-reset { background: none; border: 1px solid var(--border-color); border-radius: 3px; cursor: pointer; color: var(--text-muted); padding: 0 5px; font-size: 0.95em; }
-.plan-card-reset:hover { color: var(--text-main); }
-
-.plan-room-load {
-  display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; padding-top: 7px;
-  border-top: 1px solid var(--border-lighter); font-size: 0.75em; color: var(--text-muted);
-}
-.plan-load { padding: 1px 5px; border-radius: 3px; background: var(--bg-card-alt); }
-.plan-load b { color: var(--text-main); }
-.plan-load.empty { opacity: 0.55; }
-.plan-load.heavy { background: #fef3c7; color: #92400e; }
-.plan-load.heavy b { color: #92400e; }
-.plan-load.over { background: #dc2626; color: #fff; }
-.plan-load.over b { color: #fff; }
-:root[data-theme="dark"] .plan-load.heavy { background: rgba(251, 191, 36, 0.18); color: #fbbf24; }
-:root[data-theme="dark"] .plan-load.heavy b { color: #fbbf24; }
-
-@media (max-width: 1100px) {
-  .suunnittelu-alue { grid-template-columns: 1fr; }
-  .plan-bucket { position: static; }
-  .plan-bucket-list { flex-direction: row; flex-wrap: wrap; }
-}
-
 /* ── Settings panel ────────────────────────────────────────────── */
-/* Everything fits one laptop screen (1280x720 and up) without scrolling: the
-   tall hours table on the left, the four small cards in a 2x2 beside it (the
-   two with the long labels in the wider of its columns), and the save button
-   in a bar at the top right. The bar is sticky, so on a
-   window too small for all of it the button still never leaves the screen. */
-.settings-page { max-width: 1440px; }
+/* Four small cards in a 2x2 that fits any laptop screen, with the save
+   button in a bar at the top right. The bar is sticky, so in a window too
+   small for all of it the button still never leaves the screen. */
+.settings-page { max-width: none; }
 
 .settings-bar {
   position: sticky;
@@ -1064,27 +975,25 @@ tr.row-invalid td { background: #fef2f2; }
 
 .settings-layout {
   display: grid;
-  grid-template-columns: minmax(560px, 640px) minmax(0, 1.4fr) minmax(0, 1fr);
+  max-width: 1000px; /* the cards stay compact; the save bar above spans the window */
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   grid-template-areas:
-    "tauto  tauto   tauto"
-    "hours  counts  kids"
-    "hours  texcel  texcel"
-    "hours  xcols   xhours";
-  grid-template-rows: auto auto auto 1fr;
+    "tauto  tauto"
+    "counts kids"
+    "texcel texcel"
+    "xcols  xhours";
   gap: 10px 16px;
   align-items: start;
 }
 .settings-layout .card { margin-bottom: 0; padding: 14px 16px; min-width: 0; }
 .sg-auto   { grid-area: tauto; }
 .sg-excel  { grid-area: texcel; }
-.sc-hours  { grid-area: hours; }
 .sc-counts { grid-area: counts; }
 .sc-kids   { grid-area: kids; }
 .sc-xhours { grid-area: xhours; }
 .sc-xcols  { grid-area: xcols; }
-/* The two top cards share a row; let them match heights so the Excel row
-   under them starts on one line. */
-.sc-counts, .sc-kids { align-self: stretch; }
+/* Cards sharing a row match heights */
+.sc-counts, .sc-kids, .sc-xcols, .sc-xhours { align-self: stretch; }
 
 .settings-group-title {
   font-size: 0.82em;
@@ -1096,24 +1005,10 @@ tr.row-invalid td { background: #fef2f2; }
 }
 .sg-excel { margin-top: 6px; }
 
-/* Narrower windows: the hours table takes the full width and the small cards
-   pair up under it. Scrolling is unavoidable here - the sticky bar covers it. */
-@media (max-width: 1180px) {
-  .settings-layout {
-    grid-template-columns: 1fr 1fr;
-    grid-template-areas:
-      "tauto  tauto"
-      "hours  hours"
-      "counts kids"
-      "texcel texcel"
-      "xcols  xhours";
-    grid-template-rows: auto;
-  }
-}
-@media (max-width: 640px) {
+@media (max-width: 700px) {
   .settings-layout {
     grid-template-columns: 1fr;
-    grid-template-areas: "tauto" "hours" "counts" "kids" "texcel" "xcols" "xhours";
+    grid-template-areas: "tauto" "counts" "kids" "texcel" "xcols" "xhours";
   }
 }
 
@@ -1135,11 +1030,6 @@ tr.row-invalid td { background: #fef2f2; }
 .settings-page input:disabled { opacity: 0.55; }
 .settings-page input:focus { outline: none; border-color: #2563eb; }
 
-.hours-table-wrap { overflow-x: auto; }
-.hours-table { width: 100%; border-collapse: collapse; }
-.hours-table th, .hours-table td { padding: 3px 8px; font-size: 0.85em; }
-.hours-table th { color: var(--text-muted-2); font-weight: 600; text-align: left; vertical-align: bottom; padding-bottom: 6px; }
-.hours-table td:nth-child(2), .hours-table th:nth-child(2) { text-align: center; }
 
 /* Label on the left, field on the right, one pair per row */
 .set-fields {
@@ -1161,8 +1051,6 @@ tr.row-invalid td { background: #fef2f2; }
 }
 .set-hint { grid-column: 1 / -1; margin-top: -2px; font-size: 0.86em; line-height: 1.35; color: var(--text-muted); }
 
-.day-checkboxes { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 4px 10px; }
-.day-checkboxes label { display: flex; align-items: center; gap: 3px; }
 
 .col-widths {
   display: grid;

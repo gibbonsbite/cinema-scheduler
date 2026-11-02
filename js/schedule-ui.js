@@ -57,7 +57,6 @@ const ScheduleUI = (() => {
     }
     buildWeekPanel();
     renderGrid();
-    buildPlanPage();
   }
 
   function undo() {
@@ -95,7 +94,7 @@ const ScheduleUI = (() => {
 
   // Manual edits snap to the "Raahauksen tarkkuus" setting (raahaus_tarkkuus,
   // default 5 min) - dragging, making room, filling gaps, moving between
-  // theaters. "Täytä ohjelma" keeps quarter hours (Scheduler.populate).
+  // theaters, copying.
   const snapOf = settings => settings?.raahaus_tarkkuus ?? 5;
   const roundSnap = (min, step) => Math.round(min / step) * step;
   const ceilSnap = (min, step) => Math.ceil(min / step) * step;
@@ -201,118 +200,16 @@ const ScheduleUI = (() => {
       const rest = [...withShows].filter(id => !ranked.includes(id));
       schedule.valitut = [...ranked, ...rest];
     }
-    // Weeks saved before the plan existed get one read off their own grid,
-    // so nothing on the Suunnittelu page starts blank.
-    if (!isPlan(schedule.suunnitelma)) schedule.suunnitelma = derivePlan(schedule.valitut, schedule.naytokset ?? []);
+    // The Suunnittelu page and its per-theater plan are gone; a plan saved
+    // with an older week is simply dropped the next time the week is saved.
+    delete schedule.suunnitelma;
     return schedule;
   }
 
-  // ── The week's plan ──────────────────────────────────────────────────────
-  // Which movies each theater runs this week, in priority order, and on
-  // which days:
-  //   suunnitelma = { 'STUDIO 1': [{ id, paivat: ['PE', ...], auto }, ...], ... }
-  // Edited on the Suunnittelu page (drag movies into a theater's box, order
-  // them, pick days) and by the theater checkboxes under each movie in the
-  // Ohjelmointi list. "Täytä ohjelma" turns it into one show per card per
-  // checked day. Higher in a theater means higher priority: the evening
-  // slot in that room, and - while the card's days are automatic - more
-  // days (AUTO_DAYS). It is the input for filling the grid, not a mirror of
-  // it: hand edits on the grid don't write back into the plan.
-  const ALL_PAIVAT = ['PE', 'LA', 'SU', 'MA', 'TI', 'KE', 'TO'];
-
-  // Days a card gets by its position in the theater while `auto`: the top
-  // two titles play every day - in the reference weeks a room's two best
-  // titles run 6-8 shows each - and the rest taper off.
-  const AUTO_DAYS = [7, 7, 4, 3, 2];
-  // A room usually runs 3 shows on Saturday and 2 on other days; partial-
-  // week cards fill the room's least-used days first (Saturday, Sunday and
-  // Friday first among equals).
-  const ROOM_DAY_SLOTS = { LA: 3 };
-  const DAY_PREFERENCE = ['LA', 'SU', 'PE', 'MA', 'TI', 'TO', 'KE'];
-
-  const emptyPlan = () => Object.fromEntries(SALAT.map(s => [s, []]));
-  const isPlan = p => !!p && typeof p === 'object' && SALAT.every(s => Array.isArray(p[s]));
-
-  // Each theater's movies and days as the grid actually has them - for weeks
-  // that predate the plan and for imported weeks. Within a theater, the
-  // movie with the most shows there comes first.
-  function derivePlan(ids, naytokset) {
-    const plan = emptyPlan();
-    const roster = ids ?? [];
-    SALAT.forEach(sali => {
-      const counts = new Map();
-      naytokset.filter(n => n.sali === sali && roster.includes(n.elokuvaId))
-        .forEach(n => counts.set(n.elokuvaId, (counts.get(n.elokuvaId) ?? 0) + 1));
-      plan[sali] = [...counts.entries()]
-        .sort((a, b) => b[1] - a[1] || roster.indexOf(a[0]) - roster.indexOf(b[0]))
-        .map(([id]) => ({ id, auto: false,
-          paivat: ALL_PAIVAT.filter(p => naytokset.some(n => n.sali === sali && n.elokuvaId === id && n.paiva === p)) }));
-    });
-    return plan;
-  }
-
+  // The days of the current week, as day codes.
   function weekPaivat() {
     const alku = currentSchedule?.viikkoAlku ?? (document.getElementById('viikko-alku').value || nextFriday());
     return Scheduler.getPaivat(alku, currentSchedule?.viikkoLoppu ?? addDays(alku, 6));
-  }
-
-  // The plan, made valid: every theater has a list, only movies still on
-  // the roster are in it, and automatic cards carry the days their position
-  // gives them for this week's dates.
-  function getPlan() {
-    ensureSchedule();
-    if (!isPlan(currentSchedule.suunnitelma)) currentSchedule.suunnitelma = derivePlan(currentSchedule.valitut, currentSchedule.naytokset);
-    const onRoster = new Set(currentSchedule.valitut ?? []);
-    SALAT.forEach(s => { currentSchedule.suunnitelma[s] = currentSchedule.suunnitelma[s].filter(c => onRoster.has(c.id)); });
-    applyAutoDays(currentSchedule.suunnitelma);
-    return currentSchedule.suunnitelma;
-  }
-
-  // Recomputes the days of every automatic card, top of each theater down.
-  function applyAutoDays(plan) {
-    const paivat = weekPaivat();
-    SALAT.forEach(sali => {
-      const load = Object.fromEntries(paivat.map(p => [p, 0]));
-      const fill = p => load[p] / (ROOM_DAY_SLOTS[p] ?? 2);
-      plan[sali].forEach((card, i) => {
-        if (card.auto) {
-          const want = Math.min(paivat.length, AUTO_DAYS[i] ?? AUTO_DAYS[AUTO_DAYS.length - 1]);
-          const chosen = [...paivat].sort((a, b) => fill(a) - fill(b) || DAY_PREFERENCE.indexOf(a) - DAY_PREFERENCE.indexOf(b)).slice(0, want);
-          card.paivat = ALL_PAIVAT.filter(p => chosen.includes(p));
-        }
-        card.paivat.forEach(p => { if (p in load) load[p]++; });
-      });
-    });
-  }
-
-  // Every change to the plan goes through here: one undo step, automatic
-  // days refreshed, saved.
-  function editPlan(change) {
-    pushUndo();
-    const plan = getPlan();
-    change(plan);
-    applyAutoDays(plan);
-    Storage.saveSchedule(currentSchedule);
-  }
-
-  // Puts a movie into a theater at `index` - its position counted without
-  // its own card, the end when omitted - or moves it there if it is already
-  // in that theater; `fromSali` takes it out of another theater at the same
-  // time (a drag between boxes).
-  function placeInTheater(plan, id, sali, index, fromSali) {
-    let card = null;
-    if (fromSali && fromSali !== sali) {
-      const at = plan[fromSali].findIndex(c => c.id === id);
-      if (at !== -1) [card] = plan[fromSali].splice(at, 1);
-    }
-    const existing = plan[sali].findIndex(c => c.id === id);
-    if (existing !== -1) [card] = plan[sali].splice(existing, 1);
-    card = card ?? { id, paivat: [], auto: true };
-    plan[sali].splice(index ?? plan[sali].length, 0, card);
-  }
-
-  function removeFromTheater(plan, id, sali) {
-    plan[sali] = plan[sali].filter(c => c.id !== id);
   }
 
   // Every roster edit needs somewhere to write, even before a program exists.
@@ -329,7 +226,6 @@ const ScheduleUI = (() => {
       viikkoLoppu: document.getElementById('viikko-loppu').value || addDays(viikkoAlku, 6),
       naytokset: [],
       valitut: [],
-      suunnitelma: emptyPlan(),
     };
     return currentSchedule;
   }
@@ -365,10 +261,8 @@ const ScheduleUI = (() => {
     pushUndo();
     currentSchedule.valitut = (currentSchedule.valitut ?? []).filter(x => x !== id);
     currentSchedule.naytokset = currentSchedule.naytokset.filter(n => n.elokuvaId !== id);
-    if (isPlan(currentSchedule.suunnitelma)) SALAT.forEach(s => removeFromTheater(currentSchedule.suunnitelma, id, s));
     Storage.saveSchedule(currentSchedule);
     buildWeekPanel();
-    buildPlanPage();
     renderGrid();
   }
 
@@ -472,7 +366,6 @@ const ScheduleUI = (() => {
       currentSchedule.valitut = valitut;
       removed.forEach(id => {
         currentSchedule.naytokset = currentSchedule.naytokset.filter(n => n.elokuvaId !== id);
-        if (isPlan(currentSchedule.suunnitelma)) SALAT.forEach(s => removeFromTheater(currentSchedule.suunnitelma, id, s));
       });
       Storage.saveSchedule(currentSchedule);
     }
@@ -480,7 +373,6 @@ const ScheduleUI = (() => {
     closePicker();
     buildWeekPanel();
     renderGrid();
-    buildPlanPage();
   }
 
   // ── Week setup panel ─────────────────────────────────────────────────────
@@ -512,7 +404,7 @@ const ScheduleUI = (() => {
     // is the same 👶 the grid blocks use (the old separate "Lapset" badge is
     // gone).
     const colors = weekColors();
-    const plan = getPlan();
+    const naytokset = currentSchedule?.naytokset ?? [];
 
     roster.forEach(m => {
       const div = document.createElement('div');
@@ -522,13 +414,12 @@ const ScheduleUI = (() => {
 
       // The whole row wears the movie's grid color, so the list reads as a
       // legend for the schedule blocks. Below the title: which theaters the
-      // movie is in this week (set on the Suunnittelu page) - indicators
-      // only, not controls.
+      // movie has shows in this week.
       const color = movieColor(m.id, colors);
       div.style.setProperty('--blk-bg', color.bg);
       div.style.setProperty('--blk-fg', color.text);
       const lastenMarker = m.lastenelokuva ? '<span title="Lastenelokuva">👶 </span>' : '';
-      const salit = SALAT.filter(sali => plan[sali].some(c => c.id === m.id));
+      const salit = SALAT.filter(sali => naytokset.some(n => n.elokuvaId === m.id && n.sali === sali));
       div.innerHTML = `
         <div class="elokuva-rivi-main">
           <span class="drag-handle" title="Raahaa järjestääksesi tai ruudukkoon lisätäksesi">⠿</span>
@@ -538,7 +429,7 @@ const ScheduleUI = (() => {
         <div class="elokuva-rivi-controls">
           <span class="sali-otsikko">Sali:</span>
           ${salit.length ? salit.map(saliBadge).join('')
-                         : '<span class="sali-merkki ei-salia" title="Lisää elokuva saliin Suunnittelu-sivulla">ei salia</span>'}
+                         : '<span class="sali-merkki ei-salia" title="Raahaa elokuva ruudukkoon lisätäksesi näytöksen">ei näytöksiä</span>'}
           <button type="button" class="btn-icon btn-danger btn-poista-viikosta" data-id="${m.id}"
                   title="Poista elokuva tältä viikolta">🗑️</button>
         </div>
@@ -570,15 +461,12 @@ const ScheduleUI = (() => {
     clearGridDropPreview();
     clearEriSaliZones();
 
-    // The list order is just the user's own arrangement - priority lives in
-    // the theater boxes on the Suunnittelu page - but it is kept with the
-    // week. A drag that ends where it started doesn't burn a history slot.
+    // The list order is just the user's own arrangement, kept with the week. A drag that ends where it started doesn't burn a history slot.
     const ids = rosterIdsFromDom();
     if (currentSchedule && !sameOrder(ids, currentSchedule.valitut ?? [])) {
       pushUndo();
       currentSchedule.valitut = ids;
       Storage.saveSchedule(currentSchedule);
-      buildPlanPage(); // the bucket follows the same order
     }
   }
 
@@ -616,8 +504,7 @@ const ScheduleUI = (() => {
   }
 
   // Wipes the grid back to a blank week without touching the roster - the
-  // starting point for building a program by hand. The plan survives too: it
-  // belongs to the roster, not to the grid.
+  // starting point for building a program by hand.
   function tyhjennaGrid() {
     const n = currentSchedule?.naytokset.length ?? 0;
     if (n === 0) return;
@@ -717,9 +604,6 @@ const ScheduleUI = (() => {
     naytokset.forEach(n => countById.set(n.elokuvaId, (countById.get(n.elokuvaId) ?? 0) + 1));
     const valitut = [...countById.entries()].sort((a, b) => b[1] - a[1]).map(([id]) => id);
 
-    // The plan is read off the imported week itself: each movie's theaters
-    // and days as the file has them.
-    const suunnitelma = derivePlan(valitut, naytokset);
 
     const alku = viikkoAlku ?? document.getElementById('viikko-alku').value ?? nextFriday();
     const loppu = viikkoLoppu ?? addDays(alku, 6);
@@ -728,7 +612,7 @@ const ScheduleUI = (() => {
     updateWeekLabel(alku, loppu);
 
     pushUndo();
-    currentSchedule = { viikkoAlku: alku, viikkoLoppu: loppu, naytokset, valitut, suunnitelma };
+    currentSchedule = { viikkoAlku: alku, viikkoLoppu: loppu, naytokset, valitut };
     Storage.saveSchedule(currentSchedule);
     buildWeekPanel();
     renderGrid();
@@ -760,7 +644,7 @@ const ScheduleUI = (() => {
     if (tyhjenna) tyhjenna.disabled = naytokset.length === 0;
   }
 
-  // The week's REAL opening hours are an outcome of the generated program,
+  // The week's REAL opening hours are an outcome of the program,
   // not a setting: derived per day from the actual showings exactly like the
   // Excel export's opening-hours row (doors open avautuu_ennen_min before
   // the first show; the closing figure is the last show's start). Shown
@@ -772,8 +656,8 @@ const ScheduleUI = (() => {
     if (!el) return;
     if (!currentSchedule || currentSchedule.naytokset.length === 0) {
       el.textContent = rosterMovies().length === 0
-        ? 'Ei näytöksiä. Lisää elokuvia viikkoon ja täytä ohjelma Suunnittelu-sivulla, tai raahaa ne ruudukkoon.'
-        : 'Ei näytöksiä. Täytä ohjelma Suunnittelu-sivulla, tai raahaa elokuvia listasta ruudukkoon.';
+        ? 'Ei näytöksiä. Lisää elokuvia viikkoon ja raahaa ne ruudukkoon.'
+        : 'Ei näytöksiä. Raahaa elokuvia listasta ruudukkoon.';
       return;
     }
     const settings = Storage.getSettings();
@@ -1424,8 +1308,7 @@ const ScheduleUI = (() => {
   // "RESIDENT EVIL 16.15 → 16.30" per moved show
   const moveLines = moves => moves.map(m => `${m.n.nimi} ${dot(m.from)} → ${dot(m.to)}`);
 
-  // Applies a plan's moves to the schedule (opening hours stretch to fit, as
-  // for a drag) and says what moved.
+  // Applies a plan's moves to the schedule and says what moved.
   function applyMoves(candidate, verb) {
     if (!candidate.moves?.length) return;
     candidate.moves.forEach(m => {
@@ -1433,7 +1316,6 @@ const ScheduleUI = (() => {
       if (!n) return;
       n.alkaa = toHHMM(m.to);
       n.loppuu = toHHMM(m.to + n.kesto);
-      extendOpeningHours(n.paiva, m.to, m.to + n.kesto);
     });
     showWarning(`Näytös ${verb} kohtaan ${dot(candidate.start)}. Samassa salissa siirtyivät myös:\n` +
       moveLines(candidate.moves).join('\n'), 'ℹ️');
@@ -1514,8 +1396,7 @@ const ScheduleUI = (() => {
       const relPos = horizontal ? floatLeft - dayColRect.left : floatTop - dayColRect.top;
       const step = snapOf(settings);
       const snappedStart = roundSnap(GRID_START + (relPos - headerOffset) / PX_PER_MIN, step);
-      // Not clamped to the day's configured opening hours - dragging past them
-      // is allowed, and extends that day's hours on drop (see onPointerUp).
+      // Anywhere from 09:00 to the latest start that still ends by 24:00.
       const wanted = Math.max(GRID_START, Math.min(snappedStart, latestStart(kesto, step)));
 
       // `start` is where the drop will actually put it: `wanted` when that fits
@@ -1699,7 +1580,6 @@ const ScheduleUI = (() => {
       plan.targets.forEach(t => {
         const n = currentSchedule.naytokset.find(x => x.id === t.id);
         Object.assign(n, { sali: t.sali, paiva: t.paiva, alkaa: toHHMM(t.start), loppuu: toHHMM(t.start + t.kesto) });
-        extendOpeningHours(t.paiva, t.start, t.start + t.kesto);
       });
       Storage.saveSchedule(currentSchedule);
       showWarning(`${plan.targets.length} näytöstä siirrettiin.`, 'ℹ️');
@@ -1760,7 +1640,6 @@ const ScheduleUI = (() => {
     n.alkaa = toHHMM(candidate.start);
     n.loppuu = toHHMM(candidate.start + n.kesto);
     applyMoves(candidate, 'siirrettiin');
-    extendOpeningHours(n.paiva, candidate.start, candidate.start + n.kesto);
     Storage.saveSchedule(currentSchedule);
     renderGrid();
     if (!candidate.moves?.length) showWarning(`${n.nimi} siirrettiin saliin ${nimi} (${n.paiva} ${dot(candidate.start)}).`, 'ℹ️');
@@ -1902,7 +1781,6 @@ const ScheduleUI = (() => {
         };
         applyMoves(lastCandidate, 'siirrettiin');
         Storage.saveSchedule(currentSchedule);
-        extendOpeningHours(lastCandidate.paiva, lastCandidate.start, lastCandidate.start + n.kesto);
         if (lastCandidate.snapped) snappedNotice(lastCandidate);
       }
     } else if (lastCandidate) {
@@ -1915,27 +1793,6 @@ const ScheduleUI = (() => {
     renderGrid();
   }
 
-  // Dragging a show earlier/later than the day's configured hours extends
-  // those hours to fit rather than blocking the move. The extended day
-  // becomes a pinned override (Storage's aukioloajat_yliajot) so it persists
-  // instead of reverting to the built-in default on next load. Note that
-  // sulkeutuu is the scheduler's evening ANCHOR (when the day's last show
-  // starts), so pinning a later value here also shifts where the next
-  // auto-generation anchors that day's evening - intentional: a manually
-  // dragged-late show is a statement that the day should run later.
-  function extendOpeningHours(paiva, startMin, endMin) {
-    const settings = Storage.getSettings();
-    const current = settings.aukioloajat[paiva];
-    const openMin = Scheduler.toMin(current.avautuu);
-    const closeMin = Scheduler.toMin(current.sulkeutuu);
-    const newOpen = Math.min(openMin, startMin);
-    const newClose = Math.max(closeMin, endMin);
-    if (newOpen === openMin && newClose === closeMin) return;
-
-    if (!settings.aukioloajat_yliajot) settings.aukioloajat_yliajot = {};
-    settings.aukioloajat_yliajot[paiva] = { avautuu: toHHMM(newOpen), sulkeutuu: toHHMM(newClose) };
-    Storage.saveSettings(settings);
-  }
 
   // ── Drag a movie from the list onto the grid to add a show ───────────────
 
@@ -2040,7 +1897,6 @@ const ScheduleUI = (() => {
     };
     currentSchedule.naytokset.push(naytos);
     applyMoves(candidate, 'lisättiin');
-    extendOpeningHours(candidate.paiva, candidate.start, candidate.start + movie.kesto);
 
     // The drag can only have started from a roster row, so the movie is already
     // on the roster - nothing to select. (Rebuilding the panel here would also
@@ -2232,9 +2088,9 @@ const ScheduleUI = (() => {
   //    back to back (gap within buffer + 14 min rounding), so the room stays
   //    packed; a deliberate longer pause is left alone;
   //  - a moved show that would start within minimivali_eri_sali of another
-  //    room's start steps later 15 min at a time until it's clear.
-  // Moves cascade down the room's day. Opening hours stretch to fit, as they
-  // do for a drag. Returns the moves so they can be announced.
+  //    room's start steps later one snap step at a time until it's clear.
+  // Moves cascade down the room's day. Returns the moves so they can be
+  // announced.
   function reflowAfterSwitch(switched, before) {
     const settings = Storage.getSettings();
     const gapSama = settings.minimivali_sama_sali;
@@ -2271,7 +2127,6 @@ const ScheduleUI = (() => {
         moves.push({ paiva, sali, nimi: cur.nimi, from: cur.alkaa, to: toHHMM(start), lateEnd: start + cur.kesto > GRID_END });
         cur.alkaa = toHHMM(start);
         cur.loppuu = toHHMM(start + cur.kesto);
-        extendOpeningHours(paiva, start, start + cur.kesto);
       }
     });
     const order = ['PE', 'LA', 'SU', 'MA', 'TI', 'KE', 'TO'];
@@ -2281,8 +2136,7 @@ const ScheduleUI = (() => {
   // Keeps the week's roster in step with a movie switch. The new movie takes
   // the old one's place in the ranking (right after it, if the old movie
   // still has shows). When the old movie has no shows left it leaves the
-  // roster and the new one inherits its plan; otherwise the new movie's plan
-  // is read off the shows it now has.
+  // roster.
   function rosterAfterSwitch(oldId, newId) {
     const valitut = currentSchedule.valitut ?? (currentSchedule.valitut = []);
     const oldGone = !currentSchedule.naytokset.some(x => x.elokuvaId === oldId);
@@ -2291,20 +2145,7 @@ const ScheduleUI = (() => {
       if (oldIdx === -1) valitut.push(newId);
       else valitut.splice(oldIdx + (oldGone ? 0 : 1), 0, newId);
     }
-    const plan = getPlan();
-    if (oldGone) {
-      // The new movie takes the old one's cards (place, days) wherever it
-      // doesn't already have its own.
-      currentSchedule.valitut = valitut.filter(id => id !== oldId);
-      SALAT.forEach(s => {
-        if (plan[s].some(c => c.id === newId)) removeFromTheater(plan, oldId, s);
-        else plan[s].forEach(c => { if (c.id === oldId) c.id = newId; });
-      });
-    } else {
-      // Both stay: the new movie gets a card in each theater it now has shows in.
-      const derived = derivePlan([newId], currentSchedule.naytokset);
-      SALAT.forEach(s => { if (derived[s].length && !plan[s].some(c => c.id === newId)) plan[s].push(derived[s][0]); });
-    }
+    if (oldGone) currentSchedule.valitut = valitut.filter(id => id !== oldId);
   }
 
   // The message stays up long enough to be read - longer for a longer one -
@@ -2317,196 +2158,6 @@ const ScheduleUI = (() => {
     bar.classList.add('visible');
     clearTimeout(warningTimer);
     warningTimer = setTimeout(() => bar.classList.remove('visible'), Math.min(15000, Math.max(5000, msg.length * 75)));
-  }
-
-  // ── Suunnittelu: the planning page ────────────────────────────────────────
-  // The week's movies sit in a bucket on the left; each theater is a box on
-  // the right. Dragging a movie from the bucket into a box puts it in that
-  // theater (a movie can be in several); its height in the box is its
-  // priority there - the top card gets the evening slot and, while its days
-  // are automatic, the most days. Cards are reordered by dragging within a
-  // box, moved by dragging to another box, and taken out by dragging back
-  // to the bucket (or ✕). Each card's day buttons pick its days by hand;
-  // ↺ hands them back to the automatic choice. "Täytä ohjelma" fills the
-  // week from all of it and opens Ohjelmointi for adjusting.
-  let planDrag = null; // { id, fromSali } while a card or bucket movie is dragged
-
-  function buildPlanPage() {
-    const page = document.getElementById('suunnittelu-sisalto');
-    if (!page || !panelActive('suunnittelu-panel')) return;
-    const alku = currentSchedule?.viikkoAlku ?? (document.getElementById('viikko-alku').value || nextFriday());
-    const loppu = currentSchedule?.viikkoLoppu ?? (document.getElementById('viikko-loppu').value || addDays(alku, 6));
-    const label = iso => `${Scheduler.weekdayOf(iso)} ${Scheduler.isoToFin(iso)}`;
-    document.getElementById('suunnittelu-viikko').textContent = `${label(alku)} – ${label(loppu)}`;
-
-    const roster = rosterMovies();
-    const byId = new Map(roster.map(m => [m.id, m]));
-    const plan = roster.length ? getPlan() : emptyPlan();
-    const paivat = weekPaivat();
-    const colors = weekColors();
-    const chip = m => {
-      const c = movieColor(m.id, colors);
-      return `<span class="plan-chip" style="background:${c.bg};color:${c.text}">${m.lastenelokuva ? '👶 ' : ''}${escHtml(m.nimi)}</span>`;
-    };
-
-    const bucket = roster.map(m => {
-      const inRooms = SALAT.filter(s => plan[s].some(c => c.id === m.id));
-      return `<div class="plan-movie" draggable="true" data-id="${m.id}">
-          ${chip(m)}<span class="plan-movie-meta">${m.kesto} min${inRooms.length ? ` · Sali: ${inRooms.map(saliBadge).join('')}` : ''}</span>
-        </div>`;
-    }).join('') || '<p class="lista-tyhja">Ei elokuvia tällä viikolla. Lisää ne &ldquo;+ Lisää elokuvia&rdquo; -painikkeella.</p>';
-
-    let total = 0;
-    const boxes = SALAT.map(sali => {
-      const perDay = Object.fromEntries(paivat.map(p => [p, 0]));
-      const cards = plan[sali].map((card, i) => {
-        const m = byId.get(card.id);
-        if (!m) return '';
-        const days = card.paivat.filter(p => paivat.includes(p));
-        days.forEach(p => perDay[p]++);
-        total += days.length;
-        return `<div class="plan-card${card.auto ? '' : ' manual'}" draggable="true" data-id="${m.id}" data-sali="${sali}">
-            <div class="plan-card-top">
-              <span class="plan-card-rank">${i + 1}.</span>${chip(m)}
-              <button type="button" class="plan-card-x" title="Poista tästä salista">✕</button>
-            </div>
-            <div class="plan-card-days">
-              ${paivat.map(p => `<button type="button" class="plan-day${card.paivat.includes(p) ? ' on' : ''}" data-paiva="${p}">${p}</button>`).join('')}
-              <span class="plan-card-n" title="Näytöksiä">${days.length}</span>
-              ${card.auto ? '<span class="plan-card-auto" title="Päivät valitaan automaattisesti sijan mukaan">auto</span>'
-                          : '<button type="button" class="plan-card-reset" title="Palauta automaattiset päivät">↺</button>'}
-            </div>
-          </div>`;
-      }).join('');
-      // A day whose shows can't fit between its earliest start and midnight
-      // (lengths plus cleanup buffers) is flagged: "Täytä ohjelma" would have
-      // to leave its lowest cards out.
-      const settings = Storage.getSettings();
-      const dayMinutes = p => plan[sali].filter(c => c.paivat.includes(p) && byId.has(c.id))
-        .reduce((sum, c, i) => sum + byId.get(c.id).kesto + (i ? settings.minimivali_sama_sali : 0), 0);
-      const loadRow = paivat.map(p => {
-        const n = perDay[p], slots = ROOM_DAY_SLOTS[p] ?? 2;
-        const over = dayMinutes(p) > 24 * 60 - toMin(settings.aukioloajat[p].avautuu);
-        const cls = over ? ' over' : n > slots + 1 ? ' heavy' : n === 0 ? ' empty' : '';
-        const title = over ? `${p}: ${n} näytöstä - ei mahdu klo 24 mennessä, alimmat jäävät pois` : `${p}: ${n} näytöstä`;
-        return `<span class="plan-load${cls}" title="${title}">${p} <b>${n}</b></span>`;
-      }).join('');
-      return `<section class="plan-room" data-sali="${sali}" data-nro="${saliNumero(sali)}">
-          <header><h3>${sali.replace('STUDIO ', 'Studio ')}</h3><span class="plan-room-sum">${Object.values(perDay).reduce((a, b) => a + b, 0)} näytöstä</span></header>
-          <div class="plan-room-list" data-sali="${sali}">${cards || '<p class="plan-room-empty">Raahaa elokuvia tähän</p>'}</div>
-          <footer class="plan-room-load">${loadRow}</footer>
-        </section>`;
-    }).join('');
-
-    page.innerHTML = `<aside class="plan-bucket"><h3>Viikon elokuvat</h3><div class="plan-bucket-list">${bucket}</div></aside><div class="plan-rooms">${boxes}</div>`;
-    document.getElementById('suunnittelu-yhteensa').textContent = `${total} ${total === 1 ? 'näytös' : 'näytöstä'} · ${roster.length} elokuvaa`;
-
-    // Dragging: bucket movies and cards both carry an id; cards also their theater.
-    page.querySelectorAll('.plan-movie, .plan-card').forEach(el => {
-      el.addEventListener('dragstart', e => {
-        planDrag = { id: el.dataset.id, fromSali: el.dataset.sali ?? null };
-        e.dataTransfer.effectAllowed = 'move';
-        e.dataTransfer.setData('text/plain', el.dataset.id);
-        el.classList.add('dragging');
-      });
-      el.addEventListener('dragend', () => { el.classList.remove('dragging'); planDrag = null; clearPlanDropMarks(); });
-    });
-    page.querySelectorAll('.plan-room-list').forEach(list => {
-      list.addEventListener('dragover', e => {
-        if (!planDrag) return;
-        e.preventDefault();
-        showPlanDropLine(list, planDropIndex(list, e.clientY));
-      });
-      list.addEventListener('dragleave', e => { if (!list.contains(e.relatedTarget)) clearPlanDropMarks(); });
-      list.addEventListener('drop', e => {
-        if (!planDrag) return;
-        e.preventDefault();
-        const { id, fromSali } = planDrag;
-        const index = planDropIndex(list, e.clientY);
-        editPlan(plan => placeInTheater(plan, id, list.dataset.sali, index, fromSali));
-        buildPlanPage();
-      });
-    });
-    const bucketEl = page.querySelector('.plan-bucket');
-    bucketEl.addEventListener('dragover', e => { if (planDrag?.fromSali) { e.preventDefault(); bucketEl.classList.add('drop-target'); } });
-    bucketEl.addEventListener('dragleave', e => { if (!bucketEl.contains(e.relatedTarget)) bucketEl.classList.remove('drop-target'); });
-    bucketEl.addEventListener('drop', e => {
-      if (!planDrag?.fromSali) return;
-      e.preventDefault();
-      const { id, fromSali } = planDrag;
-      editPlan(plan => removeFromTheater(plan, id, fromSali));
-      buildPlanPage();
-    });
-
-    // Card buttons
-    page.querySelectorAll('.plan-card').forEach(cardEl => {
-      const { id, sali } = cardEl.dataset;
-      const card = () => getPlan()[sali].find(c => c.id === id);
-      cardEl.querySelector('.plan-card-x').addEventListener('click', () => { editPlan(plan => removeFromTheater(plan, id, sali)); buildPlanPage(); });
-      cardEl.querySelectorAll('.plan-day').forEach(btn => btn.addEventListener('click', () => {
-        editPlan(() => {
-          const c = card();
-          const on = !c.paivat.includes(btn.dataset.paiva);
-          c.paivat = ALL_PAIVAT.filter(p => p === btn.dataset.paiva ? on : c.paivat.includes(p));
-          c.auto = false;
-        });
-        buildPlanPage();
-      }));
-      cardEl.querySelector('.plan-card-reset')?.addEventListener('click', () => { editPlan(() => { card().auto = true; }); buildPlanPage(); });
-    });
-  }
-
-  // Where in a theater's list a drop at clientY goes, counted without the
-  // dragged card itself: before the first other card whose midpoint is
-  // below the cursor, or at the end.
-  function planDropIndex(list, clientY) {
-    const cards = [...list.querySelectorAll('.plan-card:not(.dragging)')];
-    const i = cards.findIndex(c => { const r = c.getBoundingClientRect(); return clientY < r.top + r.height / 2; });
-    return i === -1 ? cards.length : i;
-  }
-
-  function showPlanDropLine(list, index) {
-    clearPlanDropMarks();
-    list.classList.add('drop-target');
-    const line = document.createElement('div');
-    line.className = 'plan-drop-line';
-    const cards = [...list.querySelectorAll('.plan-card:not(.dragging)')];
-    if (index < cards.length) list.insertBefore(line, cards[index]); else list.appendChild(line);
-  }
-
-  function clearPlanDropMarks() {
-    document.querySelectorAll('.plan-drop-line').forEach(l => l.remove());
-    document.querySelectorAll('#suunnittelu-panel .drop-target').forEach(el => el.classList.remove('drop-target'));
-  }
-
-  // Fills the week from the plan, replacing whatever is on the grid (after a
-  // yes), then opens it in Ohjelmointi for adjusting. One undo step.
-  function fillProgram() {
-    const roster = rosterMovies();
-    if (roster.length === 0) { alert('Lisää ensin elokuvia viikkoon.'); return; }
-    const plan = getPlan();
-    if (SALAT.every(s => plan[s].length === 0)) { alert('Raahaa ensin elokuvia saleihin.'); return; }
-    const outside = roster.filter(m => !SALAT.some(s => plan[s].some(c => c.id === m.id)));
-
-    const alku = currentSchedule.viikkoAlku ?? (document.getElementById('viikko-alku').value || nextFriday());
-    const loppu = currentSchedule.viikkoLoppu ?? (document.getElementById('viikko-loppu').value || addDays(alku, 6));
-    const { naytokset, warnings, dropped } = Scheduler.populate(new Map(roster.map(m => [m.id, m])), plan, Storage.getSettings(), alku, loppu);
-
-    const existing = currentSchedule.naytokset.length;
-    let msg = existing > 0 ? `Nykyiset ${existing} näytöstä korvataan suunnitelman mukaisilla.` : '';
-    if (outside.length) msg += `${msg ? '\n\n' : ''}Näitä elokuvia ei ole missään salissa, joten ne jäävät ilman näytöksiä:\n${outside.map(m => `• ${m.nimi}`).join('\n')}`;
-    // Shows past midnight are never placed: a day too full for its theater
-    // keeps its higher-priority shows, and the user hears which are left out.
-    if (dropped.length) msg += `${msg ? '\n\n' : ''}Nämä eivät mahdu klo 24 mennessä, joten ne jäävät pois:\n${dropped.map(d => `• ${d.paiva} ${d.sali.replace('STUDIO ', 'Studio ')}: ${d.nimi}`).join('\n')}`;
-    if (msg && !confirm(`${msg}\n\nJatketaanko?`)) return;
-
-    pushUndo();
-    currentSchedule.viikkoAlku = alku;
-    currentSchedule.viikkoLoppu = loppu;
-    currentSchedule.naytokset = naytokset;
-    Storage.saveSchedule(currentSchedule);
-    document.querySelector('.tab-btn[data-tab="ohjelmointi"]')?.click();
-    if (warnings.length) showWarning(warnings.join('\n'));
   }
 
   // ── Init ──────────────────────────────────────────────────────────────────
@@ -2572,11 +2223,8 @@ const ScheduleUI = (() => {
     });
 
 
-    // Week movie picker - reachable from both the Ohjelmointi list and the
-    // Suunnittelu page
+    // Week movie picker
     document.getElementById('btn-lisaa-viikkoon').addEventListener('click', openPicker);
-    document.getElementById('btn-suunnittelu-lisaa').addEventListener('click', openPicker);
-    document.getElementById('btn-tayta-ohjelma').addEventListener('click', fillProgram);
     document.getElementById('elokuva-lista').addEventListener('dragover', onRowDragOver);
     document.getElementById('aikataulu-grid').addEventListener('mousedown', onGridMouseDown);
     document.addEventListener('keydown', e => {
@@ -2617,7 +2265,7 @@ const ScheduleUI = (() => {
       const t = e.target;
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT')) return;
       // Only when the schedule editor tab is visible
-      if (!['ohjelmointi-panel', 'suunnittelu-panel'].some(p => document.getElementById(p).classList.contains('active'))) return;
+      if (!document.getElementById('ohjelmointi-panel').classList.contains('active')) return;
       const key = e.key.toLowerCase();
       if (key === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
       else if (key === 'y' || (key === 'z' && e.shiftKey)) { e.preventDefault(); redo(); }
@@ -2677,5 +2325,5 @@ const ScheduleUI = (() => {
     markActive();
   }
 
-  return { init, buildWeekPanel, renderGrid, buildPlanPage };
+  return { init, buildWeekPanel, renderGrid };
 })();
