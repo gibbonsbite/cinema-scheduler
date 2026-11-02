@@ -334,14 +334,53 @@
 </div>
 
 <!-- ══════════════════════════════════════════════════════════════════════ -->
+<!-- MODAL: Hinnanmuutos (yksi näytös, valitut näytökset tai koko päivä)    -->
+<!-- ══════════════════════════════════════════════════════════════════════ -->
+<div class="modal-overlay" id="hinta-modal">
+  <div class="modal">
+    <h2 id="hinta-modal-otsikko">Muuta hintaa</h2>
+    <div class="form-row" id="hinta-sali-rivi">
+      <label for="hinta-sali">Salit</label>
+      <select id="hinta-sali"></select>
+    </div>
+    <div class="form-row">
+      <label>Muutos</label>
+      <div class="hinta-tavat" id="hinta-tavat">
+        <label><input type="radio" name="hinta-tapa" value="hinta"> Kiinteä hinta</label>
+        <label><input type="radio" name="hinta-tapa" value="prosentti"> Alennus %</label>
+        <label><input type="radio" name="hinta-tapa" value="euro"> Muutos €</label>
+        <label><input type="radio" name="hinta-tapa" value="palauta"> Normaalihinta</label>
+      </div>
+    </div>
+    <div class="form-row" id="hinta-arvo-rivi">
+      <label for="hinta-arvo" id="hinta-arvo-label">Uusi hinta (€)</label>
+      <input type="number" id="hinta-arvo" step="0.50">
+      <p class="hinta-ohje" id="hinta-ohje"></p>
+    </div>
+    <div class="hinta-esikatselu" id="hinta-esikatselu"></div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" id="btn-hinta-peruuta">Peruuta</button>
+      <button class="btn btn-primary" id="btn-hinta-tallenna">Muuta hinnat</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════ -->
 <!-- CONTEXT MENU                                                            -->
 <!-- ══════════════════════════════════════════════════════════════════════ -->
 <div id="context-menu">
   <button id="ctx-muokkaa">✏️ Muokkaa näytöstä</button>
+  <button id="ctx-hinta">💶 Muuta hintaa…</button>
   <button id="ctx-kopioi">📋 Kopioi seuraavaan</button>
   <div id="ctx-salit"></div>
   <div class="ctx-sep"></div>
   <button id="ctx-poista" style="color:#dc2626">🗑️ Poista näytös</button>
+</div>
+
+<!-- Right-click on a weekday (its header or any empty spot in the day) -->
+<div id="day-menu" class="ctx-menu">
+  <button id="day-ctx-hinta">💶 Muuta päivän hintoja…</button>
+  <button id="day-ctx-palauta">↺ Palauta päivän normaalihinnat…</button>
 </div>
 
 <!-- ── Scripts ──────────────────────────────────────────────────────────── -->

@@ -727,6 +727,7 @@ const ScheduleUI = (() => {
     container.classList.toggle('suunta-vaaka', horizontal);
     container.classList.toggle('grid-tyhja', naytokset.length === 0);
     const colors = weekColors();
+    const normal = normalPrices();
 
     const totalMin = GRID_END - GRID_START;
     const gridLen = totalMin * PX_PER_MIN; // px length of the time axis
@@ -819,12 +820,13 @@ const ScheduleUI = (() => {
         // offset past the day header - 14 elements per cell, ~300 per grid,
         // were most of a rebuild's style and layout work.
         dayCol.style.setProperty('--hour-offset', headerOffset + 'px');
+        dayCol.addEventListener('contextmenu', onDayContextMenu);
 
         screenings.forEach(n => {
           // A show being dragged is drawn only by its ghost (which lives
           // outside the grid and survives this rebuild - see onBlockMouseDown).
           if (dragState && n.id === dragState.id) return;
-          const block = buildBlock(n, horizontal, headerOffset, colors);
+          const block = buildBlock(n, horizontal, headerOffset, colors, normal);
           block.classList.toggle('pysty-teksti', sideways);
           if (selectedIds.has(n.id)) block.classList.add('selected');
           dayCol.appendChild(block);
@@ -850,7 +852,6 @@ const ScheduleUI = (() => {
     });
 
     container.appendChild(wrapper);
-    attachContextMenu();
   }
 
   // Positions an element along the time axis: `offset`/`sizeAlong` go on
@@ -893,13 +894,14 @@ const ScheduleUI = (() => {
   // A show block is drawn like a file folder: the title on a tab at the top
   // left, the showtime large on the body below it. Both parts take the
   // movie's color from --blk-bg / --blk-fg set on the block.
-  function blockInner(nimi, aika, isLasten) {
+  function blockInner(nimi, aika, isLasten, hintaTag = '') {
     const lasten = isLasten ? '<span class="block-lasten" title="Lastenelokuva">👶</span>' : '';
+    const hinta = hintaTag ? `<span class="block-hinta">${hintaTag}</span>` : '';
     return `<div class="block-tab">${lasten}<span class="block-nimi">${escHtml(nimi)}</span></div>` +
-      `<div class="block-body"><span class="block-time">${aika}</span></div>`;
+      `<div class="block-body"><span class="block-time">${aika}</span>${hinta}</div>`;
   }
 
-  function buildBlock(n, horizontal, headerOffset, colors) {
+  function buildBlock(n, horizontal, headerOffset, colors, normal = normalPrices()) {
     const startMin = toMin(n.alkaa);
     const offset = headerOffset + (startMin - GRID_START) * PX_PER_MIN;
     const sizeAlong = Math.max(n.kesto * PX_PER_MIN, horizontal ? 40 : 20);
@@ -912,10 +914,15 @@ const ScheduleUI = (() => {
     block.style.setProperty('--blk-fg', color.text);
     block.dataset.id = n.id;
     // The length isn't printed on the block any more; it stays in the tooltip.
-    block.title = `${n.nimi}\n${n.alkaa}–${n.loppuu}\n${n.kesto} min`;
+    // The price is in the tooltip; on the block itself only when it differs
+    // from the movie's normal price (a discount, a special show).
+    const base = normalPrice(n, normal);
+    const changed = Number.isFinite(n.hinta) && Number.isFinite(base) && Math.abs(n.hinta - base) >= 0.005;
+    const hintaRivi = Number.isFinite(n.hinta) ? `\n${fmtEur(n.hinta)}${changed ? ` (normaali ${fmtEur(base)})` : ''}` : '';
+    block.title = `${n.nimi}\n${n.alkaa}–${n.loppuu}\n${n.kesto} min${hintaRivi}`;
 
     const isLasten = n.lastenelokuva === true || n.kategoria === 'lastenelokuva';
-    block.innerHTML = blockInner(n.nimi, n.alkaa.replace(':', '.'), isLasten);
+    block.innerHTML = blockInner(n.nimi, n.alkaa.replace(':', '.'), isLasten, changed ? fmtEur(n.hinta) : '');
 
     block.addEventListener('mousedown', onBlockMouseDown);
     block.addEventListener('contextmenu', onContextMenu);
@@ -1915,6 +1922,8 @@ const ScheduleUI = (() => {
   // never hangs off the bottom or right edge.
   function onContextMenu(e) {
     e.preventDefault();
+    e.stopPropagation(); // the day under the show has a menu of its own
+    closeMenus();
     contextTarget = e.currentTarget.dataset.id;
 
     // "Siirrä saliin ..." for each of the other two theaters
@@ -1927,9 +1936,14 @@ const ScheduleUI = (() => {
       moveToSali(contextTarget, b.dataset.sali);
     }));
 
-    const menu = document.getElementById('context-menu');
-    menu.classList.add('open');
+    const many = hintaTargetsFromMenu().length;
+    document.getElementById('ctx-hinta').textContent = many > 1 ? `💶 Muuta hintaa (${many} valittua)…` : '💶 Muuta hintaa…';
 
+    openMenuAt(document.getElementById('context-menu'), e);
+  }
+
+  function openMenuAt(menu, e) {
+    menu.classList.add('open');
     const margin = 4;
     const left = Math.max(margin, Math.min(e.clientX, window.innerWidth - menu.offsetWidth - margin));
     const top = Math.max(margin, Math.min(e.clientY, window.innerHeight - menu.offsetHeight - margin));
@@ -1937,10 +1951,182 @@ const ScheduleUI = (() => {
     menu.style.top  = top + 'px';
   }
 
-  function attachContextMenu() {
-    document.addEventListener('click', () => {
-      document.getElementById('context-menu').classList.remove('open');
-    }, { once: false });
+  function closeMenus() {
+    document.getElementById('context-menu').classList.remove('open');
+    document.getElementById('day-menu').classList.remove('open');
+  }
+
+  // ── Ticket prices ─────────────────────────────────────────────────────────
+  // Every show carries its own price (it's what the Excel export writes). A
+  // show's "normal" price is its movie's price in the library; percentage and
+  // euro changes are worked out from that, never from the current price, so
+  // putting a 20 % discount on a day that already had one gives 20 %, not 36 %.
+  // A show whose movie has left the library counts its own price as normal.
+
+  const PAIVA_NIMET = { PE: 'Perjantai', LA: 'Lauantai', SU: 'Sunnuntai', MA: 'Maanantai', TI: 'Tiistai', KE: 'Keskiviikko', TO: 'Torstai' };
+  const fmtEur = x => `${x.toFixed(2)} €`;
+  const roundCents = x => Math.round(x * 100) / 100;
+  const normalPrices = () => new Map(Library.getAll().map(m => [m.id, m.hinta]));
+  const normalPrice = (n, normal) => normal.get(n.elokuvaId) ?? n.hinta;
+
+  // What the price dialog is working on: either a fixed set of shows, or a
+  // weekday (whose theaters the dialog lets the user narrow down).
+  let hintaKohde = null;
+  let dayMenuPaiva = null;
+
+  // The shows a show's "Muuta hintaa" acts on: all the selected ones when the
+  // right-clicked show is one of several selected, else just that show.
+  function hintaTargetsFromMenu() {
+    if (!contextTarget) return [];
+    if (selectedIds.has(contextTarget) && selectedIds.size > 1) return [...selectedIds];
+    return [contextTarget];
+  }
+
+  function dayLabel(paiva) {
+    const alku = currentSchedule?.viikkoAlku;
+    const idx = alku ? Scheduler.getPaivat(alku, currentSchedule.viikkoLoppu).indexOf(paiva) : -1;
+    const pvm = idx >= 0 ? Scheduler.isoToFin(addDays(alku, idx)) : '';
+    return `${PAIVA_NIMET[paiva] ?? paiva}${pvm ? ' ' + pvm : ''}`;
+  }
+
+  function onDayContextMenu(e) {
+    if (e.target.closest('.naytokset-block')) return;
+    e.preventDefault();
+    closeMenus();
+    dayMenuPaiva = e.currentTarget.dataset.paiva;
+    const count = (currentSchedule?.naytokset ?? []).filter(n => n.paiva === dayMenuPaiva).length;
+    const lyhyt = dayMenuPaiva.charAt(0) + dayMenuPaiva.slice(1).toLowerCase();
+    const muuta = document.getElementById('day-ctx-hinta');
+    const palauta = document.getElementById('day-ctx-palauta');
+    muuta.textContent = count ? `💶 Muuta päivän hintoja (${lyhyt}, ${count} näytöstä)…` : `💶 ${lyhyt}: ei näytöksiä`;
+    palauta.textContent = `↺ Palauta päivän normaalihinnat…`;
+    muuta.disabled = palauta.disabled = count === 0;
+    openMenuAt(document.getElementById('day-menu'), e);
+  }
+
+  function openHintaModal(kohde, tapa, arvo) {
+    hintaKohde = kohde;
+    const otsikko = document.getElementById('hinta-modal-otsikko');
+    const saliRivi = document.getElementById('hinta-sali-rivi');
+    if (kohde.paiva) {
+      const shows = currentSchedule.naytokset.filter(n => n.paiva === kohde.paiva);
+      otsikko.textContent = `Päivän hinnat: ${dayLabel(kohde.paiva)}`;
+      const option = (v, label, n) => `<option value="${v}">${label} (${n} ${n === 1 ? 'näytös' : 'näytöstä'})</option>`;
+      document.getElementById('hinta-sali').innerHTML = option('KAIKKI', 'Kaikki salit', shows.length) +
+        SALAT.map(s => option(s, s.replace('STUDIO ', 'Studio '), shows.filter(n => n.sali === s).length)).join('');
+      saliRivi.hidden = false;
+    } else {
+      const n = kohde.ids.length === 1 ? currentSchedule.naytokset.find(x => x.id === kohde.ids[0]) : null;
+      otsikko.textContent = n
+        ? `Hinta: ${n.nimi} (${n.paiva.charAt(0)}${n.paiva.slice(1).toLowerCase()} ${n.alkaa.replace(':', '.')}, ${n.sali.replace('STUDIO ', 'Studio ')})`
+        : `Hinta: ${kohde.ids.length} valittua näytöstä`;
+      saliRivi.hidden = true;
+    }
+    document.querySelector(`input[name="hinta-tapa"][value="${tapa}"]`).checked = true;
+    document.getElementById('hinta-arvo').value = arvo ?? '';
+    updateHintaModal();
+    document.getElementById('hinta-modal').classList.add('open');
+    const input = document.getElementById('hinta-arvo');
+    if (tapa !== 'palauta') { input.focus(); input.select(); }
+  }
+
+  function closeHintaModal() {
+    document.getElementById('hinta-modal').classList.remove('open');
+    hintaKohde = null;
+  }
+
+  function hintaShows() {
+    if (!hintaKohde || !currentSchedule) return [];
+    if (hintaKohde.paiva) {
+      const sali = document.getElementById('hinta-sali').value;
+      return currentSchedule.naytokset.filter(n => n.paiva === hintaKohde.paiva && (sali === 'KAIKKI' || n.sali === sali));
+    }
+    const ids = new Set(hintaKohde.ids);
+    return currentSchedule.naytokset.filter(n => ids.has(n.id));
+  }
+
+  // The new price for one show, or null while the input can't give one.
+  function newPrice(tapa, arvo, base) {
+    if (tapa === 'palauta') return Number.isFinite(base) ? base : null;
+    if (!Number.isFinite(arvo)) return null;
+    if (tapa === 'hinta') return arvo >= 0 ? roundCents(arvo) : null;
+    if (!Number.isFinite(base)) return null;
+    if (tapa === 'prosentti') return arvo <= 100 ? roundCents(Math.max(0, base * (1 - arvo / 100))) : null;
+    return roundCents(Math.max(0, base + arvo)); // 'euro'
+  }
+
+  // Redraws the dialog for the current choice: the value field's label and
+  // hint, and a row per affected show with its old and new price.
+  function hintaPlan() {
+    const tapa = document.querySelector('input[name="hinta-tapa"]:checked')?.value ?? 'hinta';
+    const arvo = parseFloat(String(document.getElementById('hinta-arvo').value).replace(',', '.'));
+    const normal = normalPrices();
+    const order = ['PE', 'LA', 'SU', 'MA', 'TI', 'KE', 'TO'];
+    const rows = hintaShows()
+      .sort((a, b) => order.indexOf(a.paiva) - order.indexOf(b.paiva) || a.sali.localeCompare(b.sali) || toMin(a.alkaa) - toMin(b.alkaa))
+      .map(n => ({ n, to: newPrice(tapa, arvo, normalPrice(n, normal)) }));
+    return { tapa, rows };
+  }
+
+  function updateHintaModal() {
+    const { tapa, rows } = hintaPlan();
+    const LABELS = {
+      hinta: ['Uusi hinta (€)', 'Kaikki näytökset saavat tämän hinnan.'],
+      prosentti: ['Alennus (%)', 'Lasketaan elokuvan normaalihinnasta (Kirjasto), joten aiempi alennus ei kasaannu. Negatiivinen luku korottaa hintaa.'],
+      euro: ['Muutos (€)', 'Lisätään elokuvan normaalihintaan (Kirjasto): esim. −2 laskee hintaa 2 €, 1,50 nostaa sitä.'],
+      palauta: ['', 'Jokainen näytös saa elokuvansa hinnan Kirjastosta.'],
+    };
+    document.getElementById('hinta-arvo-label').textContent = LABELS[tapa][0];
+    document.getElementById('hinta-ohje').textContent = LABELS[tapa][1];
+    // (.form-row label sets display, which would beat the hidden attribute)
+    document.getElementById('hinta-arvo').style.display = tapa === 'palauta' ? 'none' : '';
+    document.getElementById('hinta-arvo-label').style.display = tapa === 'palauta' ? 'none' : '';
+    document.getElementById('hinta-arvo').min = tapa === 'hinta' ? '0' : '';
+
+    const muuttuu = rows.filter(r => r.to != null && Math.abs(r.to - r.n.hinta) >= 0.005);
+    const multiDay = new Set(rows.map(r => r.n.paiva)).size > 1;
+    const esikatselu = document.getElementById('hinta-esikatselu');
+    const ready = rows.length && rows.every(r => r.to != null);
+    if (rows.length <= 1 && !hintaKohde?.paiva) {
+      esikatselu.innerHTML = ready && rows[0] && muuttuu.length ? `<div class="hinta-yhteenveto">${fmtEur(rows[0].n.hinta)} → ${fmtEur(rows[0].to)}</div>` : '';
+    } else {
+      const summary = !rows.length ? 'Ei näytöksiä.'
+        : !ready ? `${rows.length} näytöstä`
+        : `${rows.length} näytöstä, ${muuttuu.length === 0 ? 'mikään hinta ei muutu' : `${muuttuu.length} ${muuttuu.length === 1 ? 'hinta muuttuu' : 'hintaa muuttuu'}`}`;
+      esikatselu.innerHTML = `<div class="hinta-yhteenveto">${summary}</div><table>${rows.map(({ n, to }) => {
+        const same = to == null || Math.abs(to - n.hinta) < 0.005;
+        return `<tr class="${same ? 'sama' : 'muuttuu'}">` +
+          `<td>${multiDay ? n.paiva + ' ' : ''}${escHtml(n.sali.replace('STUDIO ', 'S'))}</td>` +
+          `<td class="num">${n.alkaa.replace(':', '.')}</td>` +
+          `<td class="nimi">${escHtml(n.nimi)}</td>` +
+          `<td class="num">${Number.isFinite(n.hinta) ? fmtEur(n.hinta) : '–'}</td>` +
+          `<td>${same ? '' : '→'}</td>` +
+          `<td class="num uusi">${same ? '' : fmtEur(to)}</td></tr>`;
+      }).join('')}</table>`;
+    }
+    document.getElementById('btn-hinta-tallenna').disabled = !ready || muuttuu.length === 0;
+  }
+
+  function saveHintaModal() {
+    const { rows } = hintaPlan();
+    if (!rows.length || rows.some(r => r.to == null)) return;
+    const muuttuu = rows.filter(r => Math.abs(r.to - r.n.hinta) >= 0.005);
+    if (!muuttuu.length) { closeHintaModal(); return; }
+    pushUndo();
+    muuttuu.forEach(r => { r.n.hinta = r.to; });
+    Storage.saveSchedule(currentSchedule);
+    closeHintaModal();
+    renderGrid();
+    showWarning(`Hinta muutettu ${muuttuu.length === 1 ? 'yhdelle näytökselle' : `${muuttuu.length} näytökselle`}.`, '💶');
+  }
+
+  function contextHinta() {
+    closeMenus();
+    const ids = hintaTargetsFromMenu();
+    if (!ids.length) return;
+    const first = currentSchedule.naytokset.find(x => x.id === ids[0]);
+    const prices = new Set(ids.map(id => currentSchedule.naytokset.find(x => x.id === id)?.hinta));
+    openHintaModal({ ids }, 'hinta', prices.size === 1 && Number.isFinite(first?.hinta) ? first.hinta.toFixed(2) : '');
   }
 
   function contextEdit() {
@@ -2272,6 +2458,37 @@ const ScheduleUI = (() => {
     });
 
     // Context menu actions
+    document.addEventListener('click', closeMenus);
+    document.getElementById('ctx-hinta').addEventListener('click', contextHinta);
+    document.getElementById('day-ctx-hinta').addEventListener('click', () => {
+      closeMenus();
+      if (dayMenuPaiva) openHintaModal({ paiva: dayMenuPaiva }, 'prosentti', '');
+    });
+    document.getElementById('day-ctx-palauta').addEventListener('click', () => {
+      closeMenus();
+      if (dayMenuPaiva) openHintaModal({ paiva: dayMenuPaiva }, 'palauta', '');
+    });
+
+    // Price dialog
+    document.getElementById('hinta-tavat').addEventListener('change', () => {
+      updateHintaModal();
+      const input = document.getElementById('hinta-arvo');
+      if (input.style.display !== 'none') input.focus();
+    });
+    document.getElementById('hinta-arvo').addEventListener('input', updateHintaModal);
+    document.getElementById('hinta-sali').addEventListener('change', updateHintaModal);
+    document.getElementById('hinta-arvo').addEventListener('keydown', e => {
+      if (e.key === 'Enter' && !document.getElementById('btn-hinta-tallenna').disabled) saveHintaModal();
+    });
+    document.getElementById('btn-hinta-tallenna').addEventListener('click', saveHintaModal);
+    document.getElementById('btn-hinta-peruuta').addEventListener('click', closeHintaModal);
+    document.getElementById('hinta-modal').addEventListener('click', e => {
+      if (e.target === e.currentTarget) closeHintaModal();
+    });
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape' && hintaKohde) closeHintaModal();
+    });
+
     document.getElementById('ctx-muokkaa').addEventListener('click', contextEdit);
     document.getElementById('ctx-poista').addEventListener('click', contextRemove);
     document.getElementById('ctx-kopioi').addEventListener('click', contextDuplicate);
